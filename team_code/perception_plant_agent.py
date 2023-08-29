@@ -20,6 +20,8 @@ import transfuser_utils as t_u
 
 SAVE_PATH = os.environ.get('SAVE_PATH', None)
 PERC_DEBUG = True
+# PERC_PATH_TO_CONF_FILE = '/home/luis/Desktop/HIWI/carla_garage/pretrained_models/longest6/tfpp_all_0'
+PERC_PATH_TO_CONF_FILE = '/mnt/qb/work/geiger/gwb710/carla_garage/pretrained_models/longest6/tfpp_all_0'
 
 from nav_planner import extrapolate_waypoint_route
 from collections import deque
@@ -84,7 +86,7 @@ class PerceptionPlanTAgent(DataAgent):
       from model import LidarCenterNet
       self.initialized = False
       self.det_th = 0.4
-      perc_path_to_conf_file = '/home/luis/Desktop/HIWI/carla_garage/pretrained_models/longest6/tfpp_all_0'
+      perc_path_to_conf_file = PERC_PATH_TO_CONF_FILE
 
       # Load the config saved during training
       with open(os.path.join(perc_path_to_conf_file, 'config.pickle'), 'rb') as args_file:
@@ -380,7 +382,7 @@ class PerceptionPlanTAgent(DataAgent):
       if light_hazard or pred_light_hazard:
         if torch.any(light_hazard) == pred_light_hazard:
           # if self.step % 15 == 0:
-          # print(f"Step:{self.step} \t Hazard Light: \t Correctly Predicted")
+          print(f"Step:{self.step} \t Hazard Light: \t Correctly Predicted")
         else:
           print(f"ERROR: \t Step:{self.step} \t Hazard Light: \t GT: {torch.any(light_hazard)}, \t PRED:{pred_light_hazard}")
           # print(pred_classes)

@@ -16,7 +16,8 @@ import sys
 
 # Our centOS is missing some c libraries.
 # Usually miniconda has them, so we tell the linker to look there as well.
-newlib = '/path/to/miniconda3/lib/'
+newlib = '/mnt/qb/work/geiger/gwb710/software/anaconda3/lib'
+# export LD_LIBRARY_PATH='/mnt/qb/work/geiger/gwb710/software/anaconda3/lib'
 if not newlib in os.environ['LD_LIBRARY_PATH']:
   os.environ['LD_LIBRARY_PATH'] += ':' + newlib
 
@@ -34,6 +35,8 @@ export PYTHONPATH=$PYTHONPATH:${{CARLA_ROOT}}/PythonAPI/carla/dist/carla-0.9.10-
 export SCENARIO_RUNNER_ROOT=scenario_runner
 export LEADERBOARD_ROOT=leaderboard
 export PYTHONPATH="${{CARLA_ROOT}}/PythonAPI/carla/":"${{SCENARIO_RUNNER_ROOT}}":"${{LEADERBOARD_ROOT}}":${{PYTHONPATH}}
+echo "CARLA_ROOT:" $CARLA_ROOT
+echo "CARLA_SERVER:" $CARLA_SERVER
 ''')
     rsh.write(f"""
 export PORT=$1
@@ -42,7 +45,7 @@ export TM_PORT=`comm -23 <(seq {carla_tm_port_start} {carla_tm_port_start+49} | 
 echo 'TM Port:' $TM_PORT
 export ROUTES={route_path}{route}.xml
 export SCENARIOS=leaderboard/data/scenarios/eval_scenarios.json
-export TEAM_AGENT=team_code/sensor_agent.py
+export TEAM_AGENT=team_code/perception_plant_agent.py
 export TEAM_CONFIG=team_code/checkpoints/{checkpoint}/
 export CHALLENGE_TRACK_CODENAME=SENSORS
 export REPETITIONS=1
@@ -122,14 +125,14 @@ def get_num_jobs(job_name, username):
 
 
 def main():
-  num_repetitions = 3
-  benchmark = 'lav'
-  experiment = 'secret_040_0'
-  model_dir = '/path/to/model/logdir'
-  code_root = '/path/to/carla_garage'
-  carla_root = '/path/to/CARLA'
-  partition = 'slurm-gpu-partition'
-  username = 'slurm_username'
+  num_repetitions = 1
+  benchmark = "longest6" # "lav"
+  experiment = 'DEBUG'
+  model_dir = '/mnt/qb/work/geiger/gwb710/carla_garage/pretrained_models/longest6/plant_all_1'
+  code_root = '/mnt/qb/work/geiger/gwb710/carla_garage'
+  carla_root = '/mnt/qb/work/geiger/gwb710/carla_garage/carla'
+  partition = 'gpu-2080ti'
+  username = 'gwb710'
   experiment_name_stem = f'{experiment}_{benchmark}'
   exp_names_tmp = []
   for i in range(num_repetitions):
@@ -141,7 +144,7 @@ def main():
   carla_streaming_port_start = 20000
   carla_tm_port_start = 30000
 
-  epochs = ['model_0030']
+  epochs = ["model_0046"]# ,'model_0030']
   job_nr = 0
   for epoch in epochs:
     # Root folder in which each of the evaluation seeds will be stored
@@ -161,10 +164,11 @@ def main():
       cmd = f'mkdir team_code/checkpoints/{checkpoint_new_name}'
       print(cmd)
       os.system(cmd)
-      cmd = f'cp {model_dir}/{checkpoint}/config.pickle team_code/checkpoints/{checkpoint_new_name}/'
+      # cmd = f'cp {model_dir}/{checkpoint}/config.pickle team_code/checkpoints/{checkpoint_new_name}/'
+      cmd = f'cp {model_dir}/config.pickle team_code/checkpoints/{checkpoint_new_name}/'
       print(cmd)
       os.system(cmd)
-      cmd = f'ln -sf {model_dir}/{checkpoint}/{epoch}.pth team_code/checkpoints/{checkpoint_new_name}/model.pth'
+      cmd = f'ln -sf {model_dir}/{epoch}.pth team_code/checkpoints/{checkpoint_new_name}/model.pth'
       print(cmd)
       os.system(cmd)
 

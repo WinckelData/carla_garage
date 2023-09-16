@@ -246,7 +246,7 @@ class PerceptionPlanTAgent(DataAgent):
     route = tick_data['route']
     if len(route) < self.config.num_route_points:
       num_missing = self.config.num_route_points - len(route)
-      route = np.array(route)
+      route = np.array(route) # Shape: (20, 2)
       # Fill the empty spots by repeating the last point.
       route = np.vstack((route, np.tile(route[-1], (num_missing, 1))))
     else:
@@ -342,10 +342,13 @@ class PerceptionPlanTAgent(DataAgent):
             # print(f"Step: {self.step} \t {pred_wp}")
           # TODO: Might need NMS here
           pred_bounding_box = self.perc_nets[i].convert_features_to_bb_metric(pred_bb_features)
-      
+          
           # Filter bounding boxes
-          pred_bounding_box = [box[:-1] for box in pred_bounding_box if box[-1] >= self.det_th ]
+          normal_pred_bounding_box = [box[:-1] for box in pred_bounding_box if box[-1] >= self.det_th ]
+          removed_pred_bounding_box = [box[:-1] for box in pred_bounding_box if box[-1] >= self.det_th and box[-2] not in [2,3]]
+          pred_bounding_box = normal_pred_bounding_box
           pred_bounding_box_padded = torch.zeros((self.config.max_num_bbs, 8), dtype=torch.float32).to(self.device)
+          
 
           if len(pred_bounding_box) > 0:
             # Pad bounding boxes to a fixed number
@@ -363,13 +366,15 @@ class PerceptionPlanTAgent(DataAgent):
           raise ValueError('The chosen vision backbone does not exist. The options are: transFuser, aim, bev_encoder')
 
       # TODO: Ensure we extract the correct values even if the light gets excluded due to max_num_bbs
+      # 0 Car, 1 Pedestrian, 2 Red light, 3 Stop sign
       pred_classes = [i[7].item() for i in pred_bounding_box_padded[0]]
       pred_light = [j == 2 for j in pred_classes]
       pred_stop_sign = [j == 3 for j in pred_classes]
       pred_light_hazard = any(pred_light)
       pred_stop_sign_hazard = any(pred_stop_sign)
       
-
+      if pred_light_hazard or pred_stop_sign_hazard:
+        print("DEBUG")
       # Debugging Hazard Predictions
 
       if stop_sign_hazard or pred_stop_sign_hazard:
@@ -396,6 +401,8 @@ class PerceptionPlanTAgent(DataAgent):
     pred_target_speeds = []
     pred_checkpoints = []
     pred_bbs = []
+    # pred_checkpoint torch.Size([1, 10, 2])
+    # route           torch.Size([1, 20, 2])
     for i in range(self.model_count):
       pred_wp, pred_target_speed, pred_checkpoint, pred_bb = self.nets[i].forward(bounding_boxes=pred_bounding_box_padded, # bounding_boxes_padded,
                                                                                   route=route, # pred_checkpoint,
@@ -416,12 +423,13 @@ class PerceptionPlanTAgent(DataAgent):
 
     pred_bbs = torch.stack(pred_bbs, dim=0).mean(dim=0)
 
+    # True
     if self.config.use_controller_input_prediction:
       pred_target_speed = torch.stack(pred_target_speeds, dim=0).mean(dim=0)
       pred_aim_wp = torch.stack(pred_checkpoints, dim=0).mean(dim=0)
       pred_aim_wp = pred_aim_wp.detach().cpu().numpy()
       pred_angle = -math.degrees(math.atan2(-pred_aim_wp[1], pred_aim_wp[0])) / 90.0
-
+      # True
       if self.uncertainty_weight:
         uncertainty = pred_target_speed.detach().cpu().numpy()
         if uncertainty[0] > self.config.brake_uncertainty_threshold:

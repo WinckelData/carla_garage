@@ -18,10 +18,17 @@ import carla
 from config import GlobalConfig
 import transfuser_utils as t_u
 
-SAVE_PATH = os.environ.get('SAVE_PATH', None)
+SAVE_PATH = None # os.environ.get('SAVE_PATH', None)
 PERC_DEBUG = True
 # PERC_PATH_TO_CONF_FILE = '/home/luis/Desktop/HIWI/carla_garage/pretrained_models/longest6/tfpp_all_0'
 PERC_PATH_TO_CONF_FILE = '/mnt/qb/work/geiger/gwb710/carla_garage/pretrained_models/longest6/tfpp_all_0'
+
+ONLY_VEHICLE_BB = int(os.environ.get('ONLY_VEHICLE_BB', 0)) == 1
+PERC_BB = int(os.environ.get('PERC_BB', 0)) == 1
+PERC_LIGHT = int(os.environ.get('PERC_LIGHT', 0)) == 1
+PERC_STOP = int(os.environ.get('PERC_STOP', 0)) == 1
+PRINT_DEBUG = False
+
 
 from nav_planner import extrapolate_waypoint_route
 from collections import deque
@@ -62,13 +69,21 @@ class PerceptionPlanTAgent(DataAgent):
     if self.uncertainty_weight:
       print('Uncertainty threshold: ', self.config.brake_uncertainty_threshold)
 
+    print("\n\n")
+    print("CUSTOM FLAGS:")
+    print(f"ONLY_VEHICLE_BB: {ONLY_VEHICLE_BB}")
+    print(f"PERC_BB: {PERC_BB}")
+    print(f"PERC_LIGHT: {PERC_LIGHT}")
+    print(f"PERC_STOP: {PERC_STOP}")
+    print("\n\n")
+
     # Load model files
     self.nets = []
     self.model_count = 0  # Counts how many models are in our ensemble
     for file in os.listdir(path_to_conf_file):
       if file.endswith('.pth'):
         self.model_count += 1
-        print("\n Loading Main Agent:")
+        print("\nLoading Main Agent:")
         print(os.path.join(path_to_conf_file, file))
         net = PlanT(self.config)
         if self.config.sync_batch_norm:
@@ -102,7 +117,7 @@ class PerceptionPlanTAgent(DataAgent):
       for file in os.listdir(perc_path_to_conf_file):
         if file.endswith('.pth'):
           self.perc_model_counts += 1
-          print("\n Loading Perception Agent:")
+          print("\nLoading Perception Agent:")
           print(os.path.join(perc_path_to_conf_file, file))
           net = LidarCenterNet(self.perc_config)
           if self.perc_config.sync_batch_norm:
@@ -205,7 +220,7 @@ class PerceptionPlanTAgent(DataAgent):
     result['command'] = torch.from_numpy(one_hot_command[np.newaxis]).to(self.device, dtype=torch.float32)
 
 
-    if self.save_path is not None:
+    if SAVE_PATH is not None:
       waypoint_route = self._waypoint_planner.run_step(result['gps'])
       waypoint_route = extrapolate_waypoint_route(waypoint_route, self.perc_config.route_points)
       route = np.array([[node[0][0], node[0][1]] for node in waypoint_route])[:self.perc_config.route_points]
@@ -261,22 +276,30 @@ class PerceptionPlanTAgent(DataAgent):
                                     dtype=torch.int32).to(self.device).unsqueeze(0).unsqueeze(0)
     junction = torch.tensor(tick_data['junction'], dtype=torch.int32).to(self.device).unsqueeze(0).unsqueeze(0)
 
-    if not PERC_DEBUG:
-      bounding_boxes, _ = self.data.parse_bounding_boxes(tick_data['bounding_boxes'])
-      bounding_boxes_padded = torch.zeros((self.config.max_num_bbs, 8), dtype=torch.float32).to(self.device)
+    ########### PRIV BBs
+    bounding_boxes, _ = self.data.parse_bounding_boxes(tick_data['bounding_boxes'])    
+    removed_bounding_boxes = [box for box in bounding_boxes if box[-1] not in [2,3]]
+    
+    if ONLY_VEHICLE_BB: 
+      bounding_boxes = removed_bounding_boxes
+    else:
+      pass
+    
+    bounding_boxes_padded = torch.zeros((self.config.max_num_bbs, 8), dtype=torch.float32).to(self.device)
 
-      if len(bounding_boxes) > 0:
-        # Pad bounding boxes to a fixed number
-        bounding_boxes = np.stack(bounding_boxes)
-        bounding_boxes = torch.tensor(bounding_boxes, dtype=torch.float32).to(self.device)
+    if len(bounding_boxes) > 0:
+      # Pad bounding boxes to a fixed number
+      bounding_boxes = np.stack(bounding_boxes)
+      bounding_boxes = torch.tensor(bounding_boxes, dtype=torch.float32).to(self.device)
 
-        if bounding_boxes.shape[0] <= self.config.max_num_bbs:
-          bounding_boxes_padded[:bounding_boxes.shape[0], :] = bounding_boxes
-        else:
-          bounding_boxes_padded[:self.config.max_num_bbs, :] = bounding_boxes[:self.config.max_num_bbs]
+      if bounding_boxes.shape[0] <= self.config.max_num_bbs:
+        bounding_boxes_padded[:bounding_boxes.shape[0], :] = bounding_boxes
+      else:
+        bounding_boxes_padded[:self.config.max_num_bbs, :] = bounding_boxes[:self.config.max_num_bbs]
 
-      bounding_boxes_padded = bounding_boxes_padded.unsqueeze(0)
-
+    bounding_boxes_padded = bounding_boxes_padded.unsqueeze(0)
+    ##############
+    
     speed = torch.tensor(tick_data['speed'], dtype=torch.float32).to(self.device).unsqueeze(0)
     
     if PERC_DEBUG:
@@ -344,7 +367,15 @@ class PerceptionPlanTAgent(DataAgent):
           pred_bounding_box = self.perc_nets[i].convert_features_to_bb_metric(pred_bb_features)
       
           # Filter bounding boxes
-          pred_bounding_box = [box[:-1] for box in pred_bounding_box if box[-1] >= self.det_th ]
+          normal_pred_bounding_box = [box[:-1] for box in pred_bounding_box if box[-1] >= self.det_th ]
+          removed_pred_bounding_box = [box[:-1] for box in pred_bounding_box if box[-1] >= self.det_th and box[-2] not in [2,3]]
+          
+          if ONLY_VEHICLE_BB: 
+            pred_bounding_box = removed_pred_bounding_box
+          else:
+            pred_bounding_box = normal_pred_bounding_box
+          
+          
           pred_bounding_box_padded = torch.zeros((self.config.max_num_bbs, 8), dtype=torch.float32).to(self.device)
 
           if len(pred_bounding_box) > 0:
@@ -363,7 +394,7 @@ class PerceptionPlanTAgent(DataAgent):
           raise ValueError('The chosen vision backbone does not exist. The options are: transFuser, aim, bev_encoder')
 
       # TODO: Ensure we extract the correct values even if the light gets excluded due to max_num_bbs
-      pred_classes = [i[7].item() for i in pred_bounding_box_padded[0]]
+      pred_classes = [i[7].item() for i in normal_pred_bounding_box]
       pred_light = [j == 2 for j in pred_classes]
       pred_stop_sign = [j == 3 for j in pred_classes]
       pred_light_hazard = any(pred_light)
@@ -371,18 +402,18 @@ class PerceptionPlanTAgent(DataAgent):
       
 
       # Debugging Hazard Predictions
-
-      if stop_sign_hazard or pred_stop_sign_hazard:
+      
+      if (stop_sign_hazard or pred_stop_sign_hazard) and PRINT_DEBUG:
         if torch.any(stop_sign_hazard) == pred_stop_sign_hazard:
-          # if self.step % 15 == 0:
-          print(f"Step:{self.step} \t Hazard Stop: \t Correctly Predicted")                      
+          if self.step % 15 == 0:
+            print(f"Step:{self.step} \t Hazard Stop: \t Correctly Predicted")                      
         else:
           print(f"ERROR: \t Step:{self.step} \t Hazard Stop: \t GT: {torch.any(stop_sign_hazard)}, \t PRED:{pred_stop_sign_hazard}")
           # print(pred_classes)
-      if light_hazard or pred_light_hazard:
+      if (light_hazard or pred_light_hazard) and PRINT_DEBUG:
         if torch.any(light_hazard) == pred_light_hazard:
-          # if self.step % 15 == 0:
-          print(f"Step:{self.step} \t Hazard Light: \t Correctly Predicted")
+          if self.step % 15 == 0:
+            print(f"Step:{self.step} \t Hazard Light: \t Correctly Predicted")
         else:
           print(f"ERROR: \t Step:{self.step} \t Hazard Light: \t GT: {torch.any(light_hazard)}, \t PRED:{pred_light_hazard}")
           # print(pred_classes)
@@ -396,12 +427,34 @@ class PerceptionPlanTAgent(DataAgent):
     pred_target_speeds = []
     pred_checkpoints = []
     pred_bbs = []
+
+    if PRINT_DEBUG:
+      print(f"Step: {self.step}")
+      print(f"Light Hazard: \t GT: {light_hazard} \t Pred: {pred_light_hazard}")
+      print(f"Stop Hazard: \t GT: {stop_sign_hazard} \t Pred: {pred_stop_sign_hazard}")
+      print(f"\n\n")
+
+    if PERC_BB:
+      used_bounding_boxes = pred_bounding_box_padded
+    else:
+      used_bounding_boxes = bounding_boxes_padded
+
+    if PERC_LIGHT:
+      used_light_hazard = pred_light_hazard
+    else:
+      used_light_hazard = light_hazard
+
+    if PERC_STOP:
+      used_stop_hazard = pred_stop_sign_hazard
+    else:
+      used_stop_hazard = stop_sign_hazard
+    
     for i in range(self.model_count):
-      pred_wp, pred_target_speed, pred_checkpoint, pred_bb = self.nets[i].forward(bounding_boxes=pred_bounding_box_padded, # bounding_boxes_padded,
+      pred_wp, pred_target_speed, pred_checkpoint, pred_bb = self.nets[i].forward(bounding_boxes=used_bounding_boxes, #pred_bounding_box_padded, # bounding_boxes_padded,
                                                                                   route=route, # pred_checkpoint,
                                                                                   target_point=target_point,
-                                                                                  light_hazard=pred_light_hazard, # light_hazard,
-                                                                                  stop_hazard=pred_stop_sign_hazard, # stop_sign_hazard,
+                                                                                  light_hazard=used_light_hazard, # pred_light_hazard, # light_hazard,
+                                                                                  stop_hazard=used_stop_hazard, # pred_stop_sign_hazard, # stop_sign_hazard,
                                                                                   junction=junction,
                                                                                   velocity=speed.unsqueeze(1))
 
@@ -437,6 +490,11 @@ class PerceptionPlanTAgent(DataAgent):
       steer, throttle, brake = self.nets[0].control_pid_direct(pred_target_speed, pred_angle, speed, False)
     else:
       steer, throttle, brake = self.nets[0].control_pid(self.pred_wp, speed, False)
+
+    # Emergency brake if red light is detected
+    if pred_light_hazard:
+      brake = 1
+      throttle = 0
 
     control = carla.VehicleControl()
     control.steer = float(steer)

@@ -1026,6 +1026,10 @@ class MapAgent(autonomous_agent.AutonomousAgent):
     del self.nets
     del self.config
 
+    if self.planning_nets:
+      del self.planning_nets
+      del self.planning_config
+
 
 # Filter Functions
 def bicycle_model_forward(x, dt, steer, throttle, brake):

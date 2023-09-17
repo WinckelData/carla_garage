@@ -42,9 +42,11 @@ import gzip
 # New imports and constants:
 from plant import PlanT
 
-PATH_TO_PLANNING_FILE = "/home/luis/Desktop/HIWI/carla_garage/pretrained_models/longest6/plant_all_1"
+# PATH_TO_PLANNING_FILE = "/home/luis/Desktop/HIWI/carla_garage/pretrained_models/longest6/plant_all_1"
+PATH_TO_PLANNING_FILE = "/mnt/qb/work/geiger/gwb710/carla_garage/pretrained_models/longest6/plant_all_1"
 USE_PERC_PLANT = 1
 DET_TH = 0.4
+ONLY_VEHICLE_BB = int(os.environ.get('ONLY_VEHICLE_BB', 0)) == 1
 
 # Configure pytorch for maximum performance
 torch.backends.cuda.matmul.allow_tf32 = True
@@ -654,15 +656,21 @@ class MapAgent(autonomous_agent.AutonomousAgent):
           ego_vel=velocity,
           command=tick_data['command'])
         # Only convert bounding boxes when they are used.
-        # TODO: this needs to be enabled
         if self.config.detect_boxes and (compute_debug_output or self.config.backbone in ('aim') or
                                          self.stop_sign_controller):
           pred_bounding_box = self.nets[i].convert_features_to_bb_metric(pred_bb_features)
-        elif self.use_perc_plant:
+        if self.use_perc_plant:
           pred_bounding_box = self.nets[i].convert_features_to_bb_metric(pred_bb_features)
           # Filter bounding boxes
           # TODO enable filtering out light and stop boxes
-          pred_bounding_box = [box[:-1] for box in pred_bounding_box if box[-1] >= self.det_th ]
+          normal_pred_bounding_box = [box[:-1] for box in pred_bounding_box if box[-1] >= self.det_th ]
+          removed_pred_bounding_box = [box[:-1] for box in pred_bounding_box if box[-1] >= self.det_th and box[-2] not in [2,3]]
+          
+          if ONLY_VEHICLE_BB: 
+            pred_bounding_box = removed_pred_bounding_box
+          else:
+            pred_bounding_box = normal_pred_bounding_box
+          
           pred_bounding_box_padded = torch.zeros((self.planning_config.max_num_bbs, 8), dtype=torch.float32).to(self.device)
 
           if len(pred_bounding_box) > 0:
@@ -676,8 +684,7 @@ class MapAgent(autonomous_agent.AutonomousAgent):
               pred_bounding_box_padded[:self.planning_config.max_num_bbs, :] = pred_bounding_box[:self.planning_config.max_num_bbs]
 
           pred_bounding_box_padded = pred_bounding_box_padded.unsqueeze(0)
-        else:
-          pred_bounding_box = None
+        
       else:
         raise ValueError('The chosen vision backbone does not exist. The options are: transFuser, aim, bev_encoder')
 
@@ -744,7 +751,7 @@ class MapAgent(autonomous_agent.AutonomousAgent):
       junction = torch.tensor(self.is_junction, dtype=torch.int32).to(self.device).unsqueeze(0).unsqueeze(0)
 
       # TODO: Use stop_for_stop_sign as flag instead for the stop sign input
-      pred_classes = [i[7].item() for i in pred_bounding_box_padded[0]]
+      pred_classes = [i[7].item() for i in normal_pred_bounding_box]
       pred_light = [j == 2 for j in pred_classes]
       pred_stop_sign = [j == 3 for j in pred_classes]
       pred_light_hazard = any(pred_light)
@@ -777,7 +784,7 @@ class MapAgent(autonomous_agent.AutonomousAgent):
                                                                                   velocity=speed)
 
       
-      print(f"Pred WP: {pred_wp}") # torch.Size([1, 40, 2])
+      # print(f"Pred WP: {pred_wp}") # torch.Size([1, 40, 2])
       pred_wps.append(pred_wp)
       pred_bbs.append(t_u.plant_quant_to_box(self.planning_config, pred_bb))
       if self.planning_config.use_controller_input_prediction:
@@ -814,9 +821,9 @@ class MapAgent(autonomous_agent.AutonomousAgent):
       else:
         # True
         steer, throttle, brake = self.planning_nets[0].control_pid(self.pred_wp, speed, False)
-      print(f"Control: Steer - {steer}, Throttle - {throttle}, Brake - {brake}")
+      # print(f"Control: Steer - {steer}, Throttle - {throttle}, Brake - {brake}")
     else:
-      print("Should NOT GET HERE")
+      # print("Should NOT GET HERE")
       if self.config.use_wp_gru:
         self.pred_wp = torch.stack(pred_wps, dim=0).mean(dim=0)
 
@@ -1016,7 +1023,6 @@ class MapAgent(autonomous_agent.AutonomousAgent):
 
         del self.tp_attention_buffer
 
-    del self.tp_sign_agrees_with_angle
     del self.nets
     del self.config
 

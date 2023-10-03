@@ -699,7 +699,8 @@ class Engine(object):
         bounding_box_label = data['bounding_boxes'].to(self.device, dtype=torch.float32)
         last_values = bounding_box_label[:, :, -1]
         print(torch.unique(last_values))
-        mask = last_values < 1. # TODO
+        mask = last_values < 1. # TODO correct filtering
+        # TODO filtering does not work correctly yet
         filtered_bounding_box_label = bounding_box_label[mask.unsqueeze(-1).expand_as(bounding_box_label)].view(bounding_box_label.size(0), -1, 8)
         print(bounding_box_label.shape)
       else:

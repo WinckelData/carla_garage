@@ -331,6 +331,11 @@ def main():
                       default=int(config.multi_wp_output),
                       help='Predict 2 WP outputs and select between them. '
                       'Only compatible with use_wp=1, transformer_decoder_join=1')
+  parser.add_argument('--vehicle_only_bb',
+                      type=int,
+                      default=0,
+                      help='Train plant with only vehicles as input'
+                      'Only compatible with use_plant=1')
 
   args = parser.parse_args()
   args.logdir = os.path.join(args.logdir, args.id)
@@ -348,12 +353,12 @@ def main():
     shared_dict = None
 
   # Use torchrun for starting because it has proper error handling. Local rank will be set automatically
-  rank = int(os.environ['RANK'])  # Rank across all processes
+  rank = int(os.environ.get('RANK', 0))  # Rank across all processes
   if args.local_rank == -999:  # For backwards compatibility
     local_rank = int(os.environ['LOCAL_RANK'])  # Rank on Node
   else:
     local_rank = int(args.local_rank)
-  world_size = int(os.environ['WORLD_SIZE'])  # Number of processes
+  world_size = int(os.environ.get('WORLD_SIZE', 1))  # Number of processes
   print(f'RANK, LOCAL_RANK and WORLD_SIZE in environ: {rank}/{local_rank}/{world_size}')
 
   device = torch.device(f'cuda:{local_rank}')
@@ -690,7 +695,15 @@ class Engine(object):
     # Load data used in both methods
     future_bounding_box_label = None
     if self.config.detect_boxes or self.config.use_plant:
-      bounding_box_label = data['bounding_boxes'].to(self.device, dtype=torch.float32)
+      if self.args.vehicle_only_bb:
+        bounding_box_label = data['bounding_boxes'].to(self.device, dtype=torch.float32)
+        last_values = bounding_box_label[:, :, -1]
+        print(torch.unique(last_values))
+        mask = last_values < 1. # TODO
+        filtered_bounding_box_label = bounding_box_label[mask.unsqueeze(-1).expand_as(bounding_box_label)].view(bounding_box_label.size(0), -1, 8)
+        print(bounding_box_label.shape)
+      else:
+        bounding_box_label = data['bounding_boxes'].to(self.device, dtype=torch.float32)
       if not self.config.use_plant:
         bb_center_heatmap = data['center_heatmap'].to(self.device, dtype=torch.float32)
         bb_wh = data['wh'].to(self.device, dtype=torch.float32)
@@ -738,7 +751,7 @@ class Engine(object):
       route = data['route'][:, :self.config.num_route_points].to(self.device, dtype=torch.float32)
 
       pred_wp, pred_target_speed, \
-      pred_checkpoint, pred_future_bounding_box, _ = self.model(bounding_boxes=bounding_box_label,
+      pred_checkpoint, pred_future_bounding_box = self.model(bounding_boxes=bounding_box_label,
                                     route=route,
                                     target_point=target_point,
                                     light_hazard=light_hazard,
@@ -985,8 +998,8 @@ class Engine(object):
       last_optimizer_file = os.path.join(self.args.logdir, f'optimizer_{self.cur_epoch - 1:04d}.pth')
       last_scaler_file = os.path.join(self.args.logdir, f'scaler_{self.cur_epoch - 1:04d}.pth')
       last_scheduler_file = os.path.join(self.args.logdir, f'scheduler_{self.cur_epoch - 1:04d}.pth')
-      if os.path.isfile(last_model_file):
-        os.remove(last_model_file)
+      # if os.path.isfile(last_model_file):
+      #   os.remove(last_model_file)
       if os.path.isfile(last_optimizer_file):
         os.remove(last_optimizer_file)
       if os.path.isfile(last_scaler_file):

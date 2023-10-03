@@ -33,7 +33,8 @@ class CARLA_Data(Dataset):  # pylint: disable=locally-disabled, invalid-name
                estimate_class_distributions=False,
                estimate_sem_distribution=False,
                shared_dict=None,
-               rank=0):
+               rank=0,
+               only_vehicle_bb=False):
     self.config = config
     assert config.img_seq_len == 1
 
@@ -70,6 +71,7 @@ class CARLA_Data(Dataset):  # pylint: disable=locally-disabled, invalid-name
     total_routes = 0
     perfect_routes = 0
     crashed_routes = 0
+    self.only_vehicle_bb = only_vehicle_bb
 
     for sub_root in tqdm(root, file=sys.stdout, disable=rank != 0):
 
@@ -565,7 +567,8 @@ class CARLA_Data(Dataset):  # pylint: disable=locally-disabled, invalid-name
       bounding_boxes, future_bounding_boxes = self.parse_bounding_boxes(loaded_boxes[self.config.seq_len - 1],
                                                                         loaded_future_boxes[self.config.seq_len - 1],
                                                                         y_augmentation=aug_translation,
-                                                                        yaw_augmentation=aug_rotation)
+                                                                        yaw_augmentation=aug_rotation,
+                                                                        only_vehicle_bb=self.only_vehicle_bb)
 
       # Pad bounding boxes to a fixed number
       bounding_boxes = np.array(bounding_boxes)
@@ -934,7 +937,7 @@ class CARLA_Data(Dataset):  # pylint: disable=locally-disabled, invalid-name
       bbox[7] = 3
     return bbox, bbox_dict['position'][2]
 
-  def parse_bounding_boxes(self, boxes, future_boxes=None, y_augmentation=0.0, yaw_augmentation=0):
+  def parse_bounding_boxes(self, boxes, future_boxes=None, y_augmentation=0.0, yaw_augmentation=0, only_vehicle_bb=False):
 
     if self.config.use_plant and future_boxes is not None:
       # Find ego matrix of the current time step, i.e. the coordinate frame we want to use:
@@ -961,12 +964,12 @@ class CARLA_Data(Dataset):  # pylint: disable=locally-disabled, invalid-name
           continue
       if current_box['class'] == 'traffic_light':
         # Only use/detect boxes that are red and affect the ego vehicle
-        if not current_box['affects_ego'] or current_box['state'] == 'Green':
+        if not current_box['affects_ego'] or current_box['state'] == 'Green' or only_vehicle_bb:
           continue
 
       if current_box['class'] == 'stop_sign':
         # Don't detect cleared stop signs.
-        if not current_box['affects_ego']:
+        if not current_box['affects_ego'] or only_vehicle_bb:
           continue
 
       # Filter bb that are outside of the LiDAR after the augmentation.

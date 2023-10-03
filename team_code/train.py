@@ -331,11 +331,10 @@ def main():
                       default=int(config.multi_wp_output),
                       help='Predict 2 WP outputs and select between them. '
                       'Only compatible with use_wp=1, transformer_decoder_join=1')
-  parser.add_argument('--vehicle_only_bb',
+  parser.add_argument('--only_vehicle_bb',
                       type=int,
                       default=0,
-                      help='Train plant with only vehicles as input'
-                      'Only compatible with use_plant=1')
+                      help='Train with only vehicle bounding boxes as input')
 
   args = parser.parse_args()
   args.logdir = os.path.join(args.logdir, args.id)
@@ -466,7 +465,8 @@ def main():
                          estimate_class_distributions=config.estimate_class_distributions,
                          estimate_sem_distribution=config.estimate_semantic_distribution,
                          shared_dict=shared_dict,
-                         rank=rank)
+                         rank=rank,
+                         only_vehicle_bb=args.only_vehicle_bb)
 
   val_set = CARLA_Data(root=config.val_data, config=config, shared_dict=shared_dict, rank=rank)
 
@@ -695,16 +695,14 @@ class Engine(object):
     # Load data used in both methods
     future_bounding_box_label = None
     if self.config.detect_boxes or self.config.use_plant:
-      if self.args.vehicle_only_bb:
-        bounding_box_label = data['bounding_boxes'].to(self.device, dtype=torch.float32)
-        last_values = bounding_box_label[:, :, -1]
-        print(torch.unique(last_values))
-        mask = last_values < 1. # TODO correct filtering
-        # TODO filtering does not work correctly yet
-        filtered_bounding_box_label = bounding_box_label[mask.unsqueeze(-1).expand_as(bounding_box_label)].view(bounding_box_label.size(0), -1, 8)
-        print(bounding_box_label.shape)
-      else:
-        bounding_box_label = data['bounding_boxes'].to(self.device, dtype=torch.float32)
+      # if self.args.only_vehicle_bb:
+      #  bounding_box_label = data['bounding_boxes'].to(self.device, dtype=torch.float32)
+      #  bb_classes = bounding_box_label[:, :, -1]
+      #  mask = bb_classes < 2 # TODO correct filtering
+      #  filtered_bounding_box_label = bounding_box_label.clone()
+      #  filtered_bounding_box_label[~mask, :] = 0  # Set vectors where mask is True to 0
+      # else:
+      bounding_box_label = data['bounding_boxes'].to(self.device, dtype=torch.float32)
       if not self.config.use_plant:
         bb_center_heatmap = data['center_heatmap'].to(self.device, dtype=torch.float32)
         bb_wh = data['wh'].to(self.device, dtype=torch.float32)

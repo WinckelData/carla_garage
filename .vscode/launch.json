@@ -1,0 +1,60 @@
+{
+    "version": "0.2.0",
+    "configurations": [
+
+        {
+            "name": "Python: Current File",
+            "type": "python",
+            "request": "launch",
+            "program": "${file}",
+            "console": "integratedTerminal",
+            // TRAINING:
+            //"module": "torch.distributed.run",
+            "justMyCode": true,
+            "args": [
+                // TRAINING:
+                //"--nnodes=1",
+                //"--nproc_per_node=1",
+                //"--max_restarts=0",
+                //"--rdzv_id=123456780",
+                //"--rdzv_backend=c10d",
+                //"team_code/train.py", 
+                //"--id=training_debug",
+                //"--batch_size=32",
+                //"--setting=all",
+                //"--root_dir=/home/luis/Desktop/HIWI/carla_garage/data",
+                //"--logdir=/home/luis/Desktop/HIWI/carla_garage/train_log",
+                //"--use_controller_input_prediction=1",
+                //"--use_wp_gru=0",
+                //"--use_discrete_command=1",
+                //"--use_plant=1",
+                //"--cpu_cores=20",
+                //"--num_repetitions=3",
+                //"--local_rank=0",
+                //"--vehicle_only_bb=1",
+                "--scenarios=/home/luis/Desktop/HIWI/carla_garage/leaderboard/data/scenarios/eval_scenarios.json",
+                // LAV:
+                //"--routes=/home/luis/Desktop/HIWI/carla_garage/leaderboard/data/lav.xml",
+                // Longest6:
+                "--routes=/home/luis/Desktop/HIWI/carla_garage/leaderboard/data/longest6.xml",
+                // for perc_plant_agent:
+                //"--agent-config=/home/luis/Desktop/HIWI/carla_garage/pretrained_models/longest6/plant_all_1",
+                //"--agent=/home/luis/Desktop/HIWI/carla_garage/team_code/perception_plant_agent.py",
+                //"--checkpoint=/home/luis/Desktop/HIWI/carla_garage/results/perception_plant_eval.json",
+                //"--track=MAP",
+                // unprivileged:
+                "--agent-config=/home/luis/Desktop/HIWI/carla_garage/pretrained_models/longest6/tfpp_all_0",
+                "--checkpoint=/home/luis/Desktop/HIWI/carla_garage/results/unprivileged_eval.json",
+                // map_agent_plant:
+                // "--agent=/home/luis/Desktop/HIWI/carla_garage/team_code/map_agent_plant.py",
+                // "--track=MAP",
+                // map_agent_SECOND_plant:
+                "--agent=/home/luis/Desktop/HIWI/carla_garage/team_code/map_agent_plant_second.py",
+                "--track=MAP",
+                // sensor_agent_plant:
+                //"--agent=/home/luis/Desktop/HIWI/carla_garage/team_code/sensor_agent_plant.py",
+            ],
+        }
+    ]
+}
+// ./carla/CarlaUE4.sh -opengl

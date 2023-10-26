@@ -1,0 +1,27 @@
+1. cd carla_garage
+# 2. git clone https://github.com/WinckelData/OpenPCDet.git 
+2. git clone https://github.com/open-mmlab/OpenPCDet.git
+3. conda create --name garage_pcd --clone garage 
+4. conda activate garage_pcd
+5. pip install spconv-cu113
+6. cd OpenPCDet
+7. change in setup.py to :
+	install_requires=[
+            'numpy',
+            'llvmlite==0.39.1',
+            'numba==0.56.0',
+            'tensorboardX',
+            'easydict',
+            'pyyaml',
+            'scikit-image',
+            'tqdm',
+            'SharedArray',
+        ],
+8. python setup.py develop
+9. pip install protobuf==3.20.*
+
+
+XX. Fixes if using original OpenPCDET:
+	- uncomment av2 dataset (requires 3.8)
+	- uncomment import init_path in test.py
+	 

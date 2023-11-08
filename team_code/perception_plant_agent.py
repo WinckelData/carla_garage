@@ -274,6 +274,7 @@ class PerceptionPlanTAgent(DataAgent):
     if DEBUG_SPEED_TF:
       # TODO: Create the same state to append as done i map_agent.py#418
       state = self._vehicle.get_transform()
+      state = np.array([state.location.x, state.location.y, state.location.z, t_u.normalize_angle(np.deg2rad(state.rotation.yaw))])
       self.state_log.append(state)
 
     tick_data_two = self.perc_plant_tick(input_data)
@@ -329,7 +330,7 @@ class PerceptionPlanTAgent(DataAgent):
     bounding_boxes_padded = bounding_boxes_padded.unsqueeze(0)
     ##############
     
-    speed = torch.tensor(tick_data['speed'], dtype=torch.float32).to(self.device).unsqueeze(0)
+    speed_ego = torch.tensor(tick_data['speed'], dtype=torch.float32).to(self.device).unsqueeze(0)
     
     if PERC_DEBUG:
       from copy import deepcopy
@@ -450,7 +451,8 @@ class PerceptionPlanTAgent(DataAgent):
       pred_stop_sign_hazard = any(pred_stop_sign)
       
       if pred_light_hazard or pred_stop_sign_hazard:
-        print("DEBUG")
+        pass 
+        # print("DEBUG")
       # Debugging Hazard Predictions
       
       if (stop_sign_hazard or pred_stop_sign_hazard) and PRINT_DEBUG:
@@ -506,7 +508,7 @@ class PerceptionPlanTAgent(DataAgent):
                                                                                   light_hazard=used_light_hazard, # pred_light_hazard, # light_hazard,
                                                                                   stop_hazard=used_stop_hazard, # pred_stop_sign_hazard, # stop_sign_hazard,
                                                                                   junction=junction,
-                                                                                  velocity=speed.unsqueeze(1))
+                                                                                  velocity=speed_ego.unsqueeze(1))
 
       pred_wps.append(pred_wp)
       pred_bbs.append(t_u.plant_quant_to_box(self.config, pred_bb))
@@ -540,7 +542,7 @@ class PerceptionPlanTAgent(DataAgent):
         self.config.use_controller_input_prediction:
       steer, throttle, brake = self.nets[0].control_pid_direct(pred_target_speed, pred_angle, speed, False)
     else:
-      steer, throttle, brake = self.nets[0].control_pid(self.pred_wp, speed, False)
+      steer, throttle, brake = self.nets[0].control_pid(self.pred_wp, speed_ego, False)
 
     # Emergency brake if red light is detected
     if pred_light_hazard:
@@ -562,7 +564,7 @@ class PerceptionPlanTAgent(DataAgent):
                                    gt_wp=route,
                                    gt_bbs=bounding_boxes_padded,
                                    pred_speed=uncertainty,
-                                   gt_speed=speed,
+                                   gt_speed=speed_ego,
                                    junction=junction,
                                    light_hazard=light_hazard,
                                    stop_sign_hazard=stop_sign_hazard,

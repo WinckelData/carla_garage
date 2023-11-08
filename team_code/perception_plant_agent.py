@@ -540,7 +540,7 @@ class PerceptionPlanTAgent(DataAgent):
 
     if self.config.inference_direct_controller and \
         self.config.use_controller_input_prediction:
-      steer, throttle, brake = self.nets[0].control_pid_direct(pred_target_speed, pred_angle, speed, False)
+      steer, throttle, brake = self.nets[0].control_pid_direct(pred_target_speed, pred_angle, speed_ego, False)
     else:
       steer, throttle, brake = self.nets[0].control_pid(self.pred_wp, speed_ego, False)
 

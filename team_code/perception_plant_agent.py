@@ -28,9 +28,9 @@ if DEBUG_SPEED_TF:
 # Local:
 # PERC_PATH_TO_CONF_FILE = '/home/luis/Desktop/HIWI/carla_garage/pretrained_models/longest6/tfpp_all_0'
 # Cloud - L6:
-# PERC_PATH_TO_CONF_FILE = '/mnt/qb/work/geiger/gwb710/carla_garage/pretrained_models/longest6/tfpp_all_0'
+PERC_PATH_TO_CONF_FILE = '/mnt/qb/work/geiger/gwb710/carla_garage/pretrained_models/longest6/tfpp_all_0'
 # Cloud - LAV:
-PERC_PATH_TO_CONF_FILE = '/mnt/qb/work/geiger/gwb710/carla_garage/pretrained_models/lav/tfpp_02_05_withheld_0/'
+# PERC_PATH_TO_CONF_FILE = '/mnt/qb/work/geiger/gwb710/carla_garage/pretrained_models/lav/tfpp_02_05_withheld_0/'
 
 # PATH_TO_SECOND_CKPT = "/mnt/qb/work/geiger/gwb710/OpenPCDet/output/custom_models/second_new/TMP_TEST_subsampled_data/LR_0.001/WEIGHT_DECAY_0.001/GRAD_NORM_CLIP_35/ckpt/checkpoint_epoch_80.pth"
 
@@ -271,14 +271,15 @@ class PerceptionPlanTAgent(DataAgent):
     tick_data = super().run_step(input_data, timestamp, plant=True)
     # ['lidar', 'rgb', 'rgb_augmented', 'semantics', 'semantics_augmented', 'depth', 'depth_augmented', 'bev_semantics', 'bev_semantics_augmented', 'bounding_boxes', 'pos_global', 'theta', 'speed', 'target_speed', 'target_point', 'target_point_next', 'command', 'next_command', 'aim_wp', 'route', 'steer', 'throttle', 'brake', 'control_brake', 'junction', 'vehicle_hazard', 'light_hazard', 'walker_hazard', 'stop_sign_hazard', 'stop_sign_close', 'walker_close', 'angle', 'augmentation_translation', 'augmentation_rotation', 'ego_matrix']
     
+    tick_data_two = self.perc_plant_tick(input_data)
+    # ['rgb', 'compass', 'lidar', 'speed']
+    
     if DEBUG_SPEED_TF:
       # TODO: Create the same state to append as done i map_agent.py#418
       state = self._vehicle.get_transform()
-      state = np.array([state.location.x, state.location.y, state.location.z, t_u.normalize_angle(np.deg2rad(state.rotation.yaw))])
+      compass = tick_data_two["compass"]
+      state = np.array([state.location.x, state.location.y, t_u.normalize_angle(compass), tick_data_two['speed']])
       self.state_log.append(state)
-
-    tick_data_two = self.perc_plant_tick(input_data)
-    # ['rgb', 'compass', 'lidar', 'speed']
 
     if self.config.debug:
       camera = input_data['rgb_debug'][1][:, :, :3]

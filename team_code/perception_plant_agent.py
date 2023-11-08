@@ -25,8 +25,15 @@ if DEBUG_SPEED_TF:
   from munkres import Munkres
   from shapely.geometry import Polygon
 
+# Local:
 # PERC_PATH_TO_CONF_FILE = '/home/luis/Desktop/HIWI/carla_garage/pretrained_models/longest6/tfpp_all_0'
-PERC_PATH_TO_CONF_FILE = '/mnt/qb/work/geiger/gwb710/carla_garage/pretrained_models/longest6/tfpp_all_0'
+# Cloud - L6:
+# PERC_PATH_TO_CONF_FILE = '/mnt/qb/work/geiger/gwb710/carla_garage/pretrained_models/longest6/tfpp_all_0'
+# Cloud - LAV:
+PERC_PATH_TO_CONF_FILE = '/mnt/qb/work/geiger/gwb710/carla_garage/pretrained_models/lav/tfpp_02_05_withheld_0/'
+
+# PATH_TO_SECOND_CKPT = "/mnt/qb/work/geiger/gwb710/OpenPCDet/output/custom_models/second_new/TMP_TEST_subsampled_data/LR_0.001/WEIGHT_DECAY_0.001/GRAD_NORM_CLIP_35/ckpt/checkpoint_epoch_80.pth"
+
 
 ONLY_VEHICLE_BB = int(os.environ.get('ONLY_VEHICLE_BB', 0)) == 1
 PERC_BB = int(os.environ.get('PERC_BB', 0)) == 1
@@ -103,6 +110,7 @@ class PerceptionPlanTAgent(DataAgent):
         self.nets.append(net)
 
     if DEBUG_SPEED_TF:
+      self.state_log = deque(maxlen=max((self.config.lidar_seq_len * self.config.data_save_freq), 2))
       # TRACKING
       self.lidar_freq = 1.0 / 10.0  # In seconds
       # self.simulator_time_step = (1.0 / 20.0)
@@ -263,6 +271,11 @@ class PerceptionPlanTAgent(DataAgent):
     tick_data = super().run_step(input_data, timestamp, plant=True)
     # ['lidar', 'rgb', 'rgb_augmented', 'semantics', 'semantics_augmented', 'depth', 'depth_augmented', 'bev_semantics', 'bev_semantics_augmented', 'bounding_boxes', 'pos_global', 'theta', 'speed', 'target_speed', 'target_point', 'target_point_next', 'command', 'next_command', 'aim_wp', 'route', 'steer', 'throttle', 'brake', 'control_brake', 'junction', 'vehicle_hazard', 'light_hazard', 'walker_hazard', 'stop_sign_hazard', 'stop_sign_close', 'walker_close', 'angle', 'augmentation_translation', 'augmentation_rotation', 'ego_matrix']
     
+    if DEBUG_SPEED_TF:
+      # TODO: Create the same state to append as done i map_agent.py#418
+      state = self._vehicle.get_transform()
+      self.state_log.append(state)
+
     tick_data_two = self.perc_plant_tick(input_data)
     # ['rgb', 'compass', 'lidar', 'speed']
 

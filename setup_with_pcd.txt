@@ -2,8 +2,9 @@
 # 2. git clone https://github.com/WinckelData/OpenPCDet.git 
 2. git clone https://github.com/open-mmlab/OpenPCDet.git
 3. conda create --name garage_pcd --clone garage 
-4. conda activate garage_pcd
-5. pip install spconv-cu113
+3.1 (on cloud) scl enable devtoolset-8 bash
+4. conda activate garage_pcd 
+5. pip install spconv-cu113 
 6. cd OpenPCDet
 7. change in setup.py to :
 	install_requires=[
@@ -17,11 +18,19 @@
             'tqdm',
             'SharedArray',
         ],
-8. python setup.py develop
-9. pip install protobuf==3.20.*
+
+8. python setup.py develop 
+	8.1 Confirm that setup.py finished without any errors
+	8.2a CUDA_HOME environment variable is not set. ' OSError: CUDA_HOME environment variable is not set. Please set it to your CUDA  install root.
+	8.2b export CUDA_HOME=/usr/local/cuda-11.1 # CUDA_HOME=$CONDA_PREFIX 
+	8.3a "[...] s/cpp_extension.py", line 1694, in _get_cuda_arch_flags     arch_list[-1] += '+PTX' IndexError: list index out of range"
+	8.3b ssh from login to debug node
+
+# 9. pip install protobuf==3.20.* x
 
 
 XX. Fixes if using original OpenPCDET:
-	- uncomment av2 dataset (requires 3.8)
-	- uncomment import init_path in test.py
+	- Copy transform_data_new_dataset_intensity.py from private Repo
+	- uncomment av2 dataset (requires 3.8) x
+	- uncomment import init_path in test.py x
 	 

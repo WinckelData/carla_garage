@@ -24,4 +24,4 @@
 XX. Fixes if using original OpenPCDET:
 	- uncomment av2 dataset (requires 3.8)
 	- uncomment import init_path in test.py
-	 
+	- pip install pyquaternion

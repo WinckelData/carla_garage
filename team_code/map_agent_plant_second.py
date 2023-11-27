@@ -62,17 +62,30 @@ if OPENPCDET:
   from shapely.geometry import Polygon
 
 
-PATH_TO_PLANNING_FILE = "/home/luis/Desktop/HIWI/carla_garage/pretrained_models/longest6/plant_all_1"
-# PATH_TO_PLANNING_FILE = "/mnt/qb/work/geiger/gwb710/carla_garage/pretrained_models/longest6/plant_all_1"
+# PCD_PATH = "/home/luis/Desktop/HIWI/carla_garage"
+PCD_PATH = "/mnt/qb/work/geiger/gwb710/carla_garage"
 
-PCD_CFG_PATH = "/home/luis/Desktop/HIWI/carla_garage/pretrained_models/SECOND/config/second_new.yaml"
-PCD_CKPT_PATH = "/home/luis/Desktop/HIWI/carla_garage/pretrained_models/SECOND/LR_0.003/WEIGHT_DECAY_0.001/GRAD_NORM_CLIP_10/ckpt/checkpoint_epoch_80.pth"
+# PATH_TO_PLANNING_FILE = f"{PCD_PATH}/pretrained_models/longest6/plant_all_1"
+# Cloud - downloaded
+# PATH_TO_PLANNING_FILE = f"{PCD_PATH}/pretrained_models/longest6/plant_all_1"
+# Cloud - LAV
+# PATH_TO_PLANNING_FILE = f"/mnt/qb/work/geiger/gwb710/carla_garage/training_logdir/plant_v08_only_vehicle_lav"
+# Cloud - L6
+# PATH_TO_PLANNING_FILE = f"/mnt/qb/work/geiger/gwb710/carla_garage/training_logdir/plant_v08_only_vehicle"
+PATH_TO_PLANNING_FILE = os.environ.get('PATH_TO_PLANNING_FILE', "")
+
+# PCD_CFG_PATH = f"{PCD_PATH}/pretrained_models/SECOND/config/second_new.yaml"
+PCD_CFG_PATH = f"/mnt/qb/work/geiger/gwb710/OpenPCDet/tools/cfgs/custom_models/second_new.yaml"
+
+# PCD_CKPT_PATH = f"{PCD_PATH}/pretrained_models/SECOND/LR_0.003/WEIGHT_DECAY_0.001/GRAD_NORM_CLIP_10/ckpt/checkpoint_epoch_80.pth"
+PCD_CKPT_PATH = f"/mnt/qb/work/geiger/gwb710/OpenPCDet/output/custom_models/second_new/TMP_TEST_subsampled_data/LR_0.003/WEIGHT_DECAY_0.001/GRAD_NORM_CLIP_10/ckpt/checkpoint_epoch_80.pth"
 
 
 USE_PERC_PLANT = 1
-DET_TH = 0.1
-PCD_DETECTION_THRESHOLD = 0.1
-ONLY_VEHICLE_BB = 1 # int(os.environ.get('ONLY_VEHICLE_BB', 0)) == 1
+DET_TH = 0.4
+PCD_DETECTION_THRESHOLD = 0.2
+ONLY_VEHICLE_BB = int(os.environ.get('ONLY_VEHICLE_BB', 0)) == 1
+TRACKING = int(os.environ.get('TRACKING', 1)) == 1
 
 # Configure pytorch for maximum performance
 torch.backends.cuda.matmul.allow_tf32 = True
@@ -247,16 +260,17 @@ class MapAgent(autonomous_agent.AutonomousAgent):
 
     # Load model files
     if OPENPCDET:
-       # TRACKING
-      self.lidar_freq = 1.0 / 10.0  # In seconds
-      # self.simulator_time_step = (1.0 / 20.0)
-      self.max_num_bb_forecast = 4  # Number of consecutive bb detection needed for a forecast
-      self.min_num_bb_forecast = 4  # Minimum number of consecutive bb detection needed for a forecast
-      self.bb_buffer_tracking = deque(maxlen=self.max_num_bb_forecast)
-      for i in range(self.max_num_bb_forecast - self.min_num_bb_forecast):
-          self.bb_buffer_tracking.append([])  # Fill in empty bounding boxes for the optional timesteps
+      # TRACKING
+      if TRACKING:
+        self.lidar_freq = 1.0 / 10.0  # In seconds
+        # self.simulator_time_step = (1.0 / 20.0)
+        self.max_num_bb_forecast = 4  # Number of consecutive bb detection needed for a forecast
+        self.min_num_bb_forecast = 4  # Minimum number of consecutive bb detection needed for a forecast
+        self.bb_buffer_tracking = deque(maxlen=self.max_num_bb_forecast)
+        for i in range(self.max_num_bb_forecast - self.min_num_bb_forecast):
+            self.bb_buffer_tracking.append([])  # Fill in empty bounding boxes for the optional timesteps
 
-    # Copied from tim for now
+      # Copied from tim for now
       original_args = sys.argv
       self.pcd_cfg_path = PCD_CFG_PATH # str(os.environ.get('PCD_CFG_PATH', 0))
       self.pcd_ckpt_path = PCD_CKPT_PATH # str(os.environ.get('PCD_CKPT_PATH', 0))
@@ -276,7 +290,7 @@ class MapAgent(autonomous_agent.AutonomousAgent):
       # cfg.root  ändern, cfg.DATA_CONFIG.DATA_PATH und 'DATA_PATH' ! TODO
       dist_test = False
 
-      log_dir = path_l(cwd + "/results/")
+      log_dir = path_l(cwd + "/evaluation/results/")
       # final_output_dir.mkdir(parents=True, exist_ok=True)
       log_file = log_dir / "pcd_log.txt"
       logger = common_utils.create_logger(log_file)
@@ -287,7 +301,8 @@ class MapAgent(autonomous_agent.AutonomousAgent):
           batch_size=pcd_args.batch_size,
           dist=dist_test, workers=pcd_args.workers, logger=logger, training=False
       )
-
+      print("Loading SECOND:")
+      print(PCD_CKPT_PATH)
       pcd_model = build_network(model_cfg=pcd_cfg.MODEL, num_class=len(pcd_cfg.CLASS_NAMES), dataset=test_set)
       pcd_model.load_params_from_file(filename=pcd_args.ckpt, to_cpu=dist_test, logger=logger,
                                       pre_trained_path=pcd_args.pretrained_model)
@@ -330,7 +345,7 @@ class MapAgent(autonomous_agent.AutonomousAgent):
     self.planning_model_count = 0
     # planning_path_to_conf_file = ""
     for file in os.listdir(planning_path_to_conf_file):
-      if file.endswith('.pth'):
+      if file.endswith('model_0046.pth'):
         self.planning_model_count += 1
         print("Loading PlanT:")
         print(os.path.join(planning_path_to_conf_file, file))
@@ -346,6 +361,15 @@ class MapAgent(autonomous_agent.AutonomousAgent):
 
     assert self.config.lidar_seq_len == self.planning_config.lidar_seq_len
     assert self.config.data_save_freq == self.planning_config.data_save_freq
+    
+    
+    print("\n\n")
+    print("CUSTOM FLAGS:")
+    print(f"\nTRACKING: {TRACKING} ")
+    print(f"ONLY_VEHICLE_BB: {ONLY_VEHICLE_BB}")
+    print(f"DET_TH_SECOND: {PCD_DETECTION_THRESHOLD}")
+    print(f"DET_TH_TF: {DET_TH}")
+
     ####### End of new Setup
 
     self.stuck_detector = 0
@@ -875,7 +899,7 @@ class MapAgent(autonomous_agent.AutonomousAgent):
           else:
             # print("Should not get here!!!!!")
             # print(pred_class)
-            pred_class = 1
+            pred_class = 0
           bbox = np.array([x, y, dx, dy, heading_angle, speed, brake, pred_class])
           pred_bounding_box_second.append(bbox)
 
@@ -910,33 +934,34 @@ class MapAgent(autonomous_agent.AutonomousAgent):
         return filtered_boxes
       """
       # TRACKING + MATCHING for speed prediction
-      boxes_corner_rep = [get_bb_corner(box) for box in pred_bounding_box_second]
-      self.bb_buffer_tracking.append(boxes_corner_rep)
-      self.update_bb_buffer_tracking()
-      self.instances = self.match_bb(self.bb_buffer_tracking)  # Associate bounding boxes to instances
-      self.list_of_unique_instances = [l[0] for l in self.instances]      
-      speed, unnormalized_speed = self.get_speed()
-      print(f"Speed predictions: {unnormalized_speed}")
-      if speed:
-        speed = speed[::-1]
-        speed_iter = 0
-        for ix, box in enumerate(pred_bounding_box_second):
-          if ix not in self.list_of_unique_instances:
-            continue
-          # box = np.array([x, y, dx, dy, heading_angle, speed, brake, pred_class])   
-          box[5] = speed[speed_iter]
-          speed_iter += 1
+      if TRACKING:
+        boxes_corner_rep = [get_bb_corner(box) for box in pred_bounding_box_second]
+        self.bb_buffer_tracking.append(boxes_corner_rep)
+        self.update_bb_buffer_tracking()
+        self.instances = self.match_bb(self.bb_buffer_tracking)  # Associate bounding boxes to instances
+        self.list_of_unique_instances = [l[0] for l in self.instances]      
+        speed, unnormalized_speed = self.get_speed()
+        print(f"Speed predictions: {unnormalized_speed}")
+        if speed:
+          speed = speed[::-1]
+          speed_iter = 0
+          for ix, box in enumerate(pred_bounding_box_second):
+            if ix not in self.list_of_unique_instances:
+              continue
+            # box = np.array([x, y, dx, dy, heading_angle, speed, brake, pred_class])   
+            box[5] = speed[speed_iter]
+            speed_iter += 1
 
-      # dict_keys(['name', 'score', 'boxes_lidar', 'pred_labels', 'frame_id'])
-      # scores = annos[0]["score"]
-      # label_names = annos[0]["name"]
-      # label_int = annos[0]["pred_labels"] # 1 -> "Car", 2 -> "Pedestrian", 3 -> "Cyclist"
-      # x, y, z, dx, dy, dz, heading_angle = frame['boxes_lidar'][i]
-      # TODO: Bring in correct format, potentially need to transform coordinates here as well...
-      # Format of transfuser output:
-        # pred_bounding_box -> List of arrays (each entry is one prediction)
-        # pred_bounding_box[0] -> BB: Array of Length 8: x,y, width, height, yaw, speed, class, score
-        # Score: 
+        # dict_keys(['name', 'score', 'boxes_lidar', 'pred_labels', 'frame_id'])
+        # scores = annos[0]["score"]
+        # label_names = annos[0]["name"]
+        # label_int = annos[0]["pred_labels"] # 1 -> "Car", 2 -> "Pedestrian", 3 -> "Cyclist"
+        # x, y, z, dx, dy, dz, heading_angle = frame['boxes_lidar'][i]
+        # TODO: Bring in correct format, potentially need to transform coordinates here as well...
+        # Format of transfuser output:
+          # pred_bounding_box -> List of arrays (each entry is one prediction)
+          # pred_bounding_box[0] -> BB: Array of Length 8: x,y, width, height, yaw, speed, class, score
+          # Score: 
   
       # Padding
       pred_bounding_box_padded_second = torch.zeros((self.planning_config.max_num_bbs, 8), dtype=torch.float32).to(self.device)

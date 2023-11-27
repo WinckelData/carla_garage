@@ -46,6 +46,11 @@ import sys
 
 OPENPCDET = 1
 DEBUG_FORWARD_PASS_SECOND = 1
+DEBUG_SPEED_SECOND = 1
+HALF_EXTENTS = 1
+
+DEBUG_SPEED_TF = 0
+DEBUG_SAVE_BB = 0
 
 if OPENPCDET:
   from OpenPCDet.transform_data_new_dataset_intensity import read_bounding_box, transform_bb_to_unified, \
@@ -199,6 +204,26 @@ class MapAgent(autonomous_agent.AutonomousAgent):
     # PERCEPTION PLANT SETTINGS:
     self.use_perc_plant = USE_PERC_PLANT
     self.det_th = DET_TH
+
+
+    PCD_CFG_PATH = "/home/luis/Desktop/HIWI/carla_garage/pretrained_models/SECOND/config/second_new.yaml"
+    PCD_CKPT_PATH = "/home/luis/Desktop/HIWI/carla_garage/pretrained_models/SECOND/LR_0.003/WEIGHT_DECAY_0.001/GRAD_NORM_CLIP_10/ckpt/checkpoint_epoch_80.pth"
+
+    print("\n\n")
+    print("CUSTOM FLAGS:")
+    print(f"USE_PERC_PLANT: {USE_PERC_PLANT}")
+    print(f"DET_TH: {DET_TH}")
+    print(f"PCD_DETECTION_THRESHOLD: {PCD_DETECTION_THRESHOLD}")
+    print(f"PCD_CFG_PATH: {PCD_CFG_PATH}")
+    print(f"PCD_CKPT_PATH: {PCD_CKPT_PATH}")
+    print(f"PATH_TO_PLANNING_FILE: {PATH_TO_PLANNING_FILE}")
+    print(f"OPENPCDET: {OPENPCDET}")
+    print(f"DEBUG_FORWARD_PASS_SECOND: {DEBUG_FORWARD_PASS_SECOND}")
+    print(f"DEBUG_SPEED_SECOND: {DEBUG_SPEED_SECOND}")
+    print(f"HALF_EXTENTS: {HALF_EXTENTS}")
+    print(f"DEBUG_SPEED_TF: {DEBUG_SPEED_TF}")
+    print(f"DEBUG_SAVE_BB: {DEBUG_SAVE_BB}")
+    print("\n\n")
 
     # Load the config saved during training
     with open(os.path.join(path_to_conf_file, 'config.pickle'), 'rb') as args_file:
@@ -383,8 +408,10 @@ class MapAgent(autonomous_agent.AutonomousAgent):
 
     #Temporal LiDAR
     self.lidar_buffer = deque(maxlen=self.config.lidar_seq_len * self.config.data_save_freq)
+    self.lidar_buffer_with_intensity = deque(maxlen=self.config.lidar_seq_len * self.config.data_save_freq)
 
     self.lidar_last = None
+    self.lidar_last_with_intensity = None
 
     self.data = CARLA_Data(root=[], config=self.config, shared_dict=None)
 
@@ -530,6 +557,7 @@ class MapAgent(autonomous_agent.AutonomousAgent):
 
     if self.config.backbone not in ('aim'):
       result['lidar'] = t_u.lidar_to_ego_coordinate(self.config, input_data['lidar'])
+      result['lidar_intensity'] = t_u.lidar_to_ego_coordinate_with_intensity(self.config, input_data['lidar'])
 
     if not self.filter_initialized:
       self.ukf.x = np.array([gps_pos[0], gps_pos[1], t_u.normalize_angle(compass), speed])
@@ -538,6 +566,11 @@ class MapAgent(autonomous_agent.AutonomousAgent):
     self.ukf.predict(steer=self.control.steer, throttle=self.control.throttle, brake=self.control.brake)
     self.ukf.update(np.array([gps_pos[0], gps_pos[1], t_u.normalize_angle(compass), speed]))
     filtered_state = self.ukf.x
+    # print(f"state: {filtered_state}")
+    # 4-d array x,y,z, yaw?
+    # filtered_state[3]:
+    # 0 at start when driving to right
+    # 
     self.state_log.append(filtered_state)
 
     result['gps'] = filtered_state[0:2]
@@ -619,6 +652,7 @@ class MapAgent(autonomous_agent.AutonomousAgent):
       # bounding_boxes, route, target_point, light_hazard, stop_hazard, junction, velocity
       if self.config.backbone not in ('aim'):
         self.lidar_last = deepcopy(tick_data['lidar'])
+        self.lidar_last_with_intensity = deepcopy(tick_data['lidar_intensity'])
       return control
 
     # Need to run this every step for GPS filtering
@@ -647,6 +681,7 @@ class MapAgent(autonomous_agent.AutonomousAgent):
     # We only get half a LiDAR at every time step. Aligns the last half into the current coordinate frame.
     if self.config.backbone not in ('aim'):
       lidar_last = self.align_lidar(self.lidar_last, ego_x_last, ego_y_last, ego_theta_last, ego_x, ego_y, ego_theta)
+      lidar_last_with_intensity = self.align_lidar_with_intensity(self.lidar_last_with_intensity, ego_x_last, ego_y_last, ego_theta_last, ego_x, ego_y, ego_theta)
 
     # Updates stop boxes by vehicle movement converting past predictions into the current frame.
     if self.stop_sign_controller:
@@ -654,14 +689,18 @@ class MapAgent(autonomous_agent.AutonomousAgent):
 
     if self.config.backbone not in ('aim'):
       lidar_current = deepcopy(tick_data['lidar'])
+      lidar_current_with_intensity = deepcopy(tick_data['lidar_intensity'])
       lidar_full = np.concatenate((lidar_current, lidar_last), axis=0)
-
+      lidar_full_with_intensity = np.concatenate((lidar_current_with_intensity, lidar_last_with_intensity), axis=0)
+      # print(lidar_current.shape,lidar_last.shape,lidar_full.shape)
       self.lidar_buffer.append(lidar_full)
+      self.lidar_buffer_with_intensity.append(lidar_full_with_intensity)
 
     if self.config.backbone not in ('aim'):
       # We wait until we have sufficient LiDARs
       if len(self.lidar_buffer) < (self.config.lidar_seq_len * self.config.data_save_freq):
         self.lidar_last = deepcopy(tick_data['lidar'])
+        self.lidar_last_with_intensity = deepcopy(tick_data['lidar_intensity'])
         tmp_control = carla.VehicleControl(0.0, 0.0, 1.0)
         self.control = tmp_control
 
@@ -670,6 +709,7 @@ class MapAgent(autonomous_agent.AutonomousAgent):
     # Possible action repeat configuration
     if self.step % self.config.action_repeat == 1:
       self.lidar_last = deepcopy(tick_data['lidar'])
+      self.lidar_last_with_intensity = deepcopy(tick_data['lidar_intensity'])
 
       return self.control
 
@@ -705,6 +745,7 @@ class MapAgent(autonomous_agent.AutonomousAgent):
 
     if self.config.backbone not in ('aim'):
       self.lidar_last = deepcopy(tick_data['lidar'])
+      self.lidar_last_with_intensity = deepcopy(tick_data['lidar_intensity'])
 
     # prepare velocity input
     gt_velocity = tick_data['speed']
@@ -753,8 +794,31 @@ class MapAgent(autonomous_agent.AutonomousAgent):
             pred_bounding_box = normal_pred_bounding_box
           
           # pred_bounding_box -> List of arrays (each entry is one prediction)
-          # pred_bounding_box[0] -> BB: Array of Length 8: x,y, extent_x?, extent_y?, yaw, brake, class
+          # pred_bounding_box[0] -> BB: Array of Length 8: x,y, extent_x, extent_y, yaw, speed, brake, class
           # class: 0 -> car, 1 -> walker, 2 -> traffic light, 3 -> stop_sign
+
+          # MATCHING + TRACKING:
+          if DEBUG_SPEED_TF:
+            boxes_corner_rep = [get_bb_corner(box) for box in pred_bounding_box]
+            # print(pred_bounding_box)
+            # print(boxes_corner_rep)
+            
+            self.bb_buffer_tracking.append(boxes_corner_rep)
+            self.update_bb_buffer_tracking()
+            self.instances = self.match_bb(self.bb_buffer_tracking)  # Associate bounding boxes to instances
+            self.list_of_unique_instances = [l[0] for l in self.instances]      
+            speed, unnormalized_speed = self.get_speed()
+            print(f"Speed predictions: {unnormalized_speed}")
+            if speed:
+              speed = speed[::-1]
+              speed_iter = 0
+              for ix, box in enumerate(pred_bounding_box):
+                if ix not in self.list_of_unique_instances:
+                  continue
+                # box = np.array([x, y, dx, dy, heading_angle, speed, brake, pred_class])   
+                box[5] = speed[speed_iter]
+                speed_iter += 1
+            
 
           pred_bounding_box_padded = torch.zeros((self.planning_config.max_num_bbs, 8), dtype=torch.float32).to(self.device)
 
@@ -792,14 +856,14 @@ class MapAgent(autonomous_agent.AutonomousAgent):
         bounding_boxes.append(pred_bounding_box)
 
     # Average the predictions from ensembles
-    if True:
-    # if self.config.detect_boxes and (compute_debug_output or self.config.backbone in ('aim') or
-    #                                  self.stop_sign_controller):
+    # if True:
+    if self.config.detect_boxes and (compute_debug_output or self.config.backbone in ('aim') or
+                                      self.stop_sign_controller):
       # We average bounding boxes by using non-maximum suppression on the set of all detected boxes.
       bbs_vehicle_coordinate_system = t_u.non_maximum_suppression(bounding_boxes, self.config.iou_treshold_nms)
 
-      if bounding_boxes:
-        print(bounding_boxes)
+      # if bounding_boxes:
+      #   print(bounding_boxes)
 
       self.bb_buffer.append(bbs_vehicle_coordinate_system)
     else:
@@ -836,7 +900,7 @@ class MapAgent(autonomous_agent.AutonomousAgent):
     if OPENPCDET and DEBUG_FORWARD_PASS_SECOND:
       # copied from Tim
 
-      lidar_pc = PointCloud(input_data['lidar'][1])
+      lidar_pc = PointCloud(self.lidar_buffer_with_intensity[-1])
       # TODO: confirm this works as planned
       lidar_unified = transform_pc_to_unified(lidar_pc)
       pc = lidar_unified.pointcloud
@@ -864,6 +928,9 @@ class MapAgent(autonomous_agent.AutonomousAgent):
       for i in range(preds_in_frame):
         if frame["score"][i] >= pcd_detection_threshold:
           x, y, z, dx, dy, dz, heading_angle = frame['boxes_lidar'][i]
+          if HALF_EXTENTS:
+            dx /= 2
+            dy /= 2
           heading_angle = t_u.normalize_angle(heading_angle)
           brake = 0
           speed = 0 # TODO
@@ -875,11 +942,10 @@ class MapAgent(autonomous_agent.AutonomousAgent):
           else:
             # print("Should not get here!!!!!")
             # print(pred_class)
-            pred_class = 1
+            pred_class = 0
           bbox = np.array([x, y, dx, dy, heading_angle, speed, brake, pred_class])
           pred_bounding_box_second.append(bbox)
 
-      # TODO: NMS on pred_bounding_box_second
       """
       def non_maximum_suppression(self, bounding_boxes, iou_treshhold=0.2):
 
@@ -910,22 +976,35 @@ class MapAgent(autonomous_agent.AutonomousAgent):
         return filtered_boxes
       """
       # TRACKING + MATCHING for speed prediction
-      boxes_corner_rep = [get_bb_corner(box) for box in pred_bounding_box_second]
-      self.bb_buffer_tracking.append(boxes_corner_rep)
-      self.update_bb_buffer_tracking()
-      self.instances = self.match_bb(self.bb_buffer_tracking)  # Associate bounding boxes to instances
-      self.list_of_unique_instances = [l[0] for l in self.instances]      
-      speed, unnormalized_speed = self.get_speed()
-      print(f"Speed predictions: {unnormalized_speed}")
-      if speed:
-        speed = speed[::-1]
-        speed_iter = 0
-        for ix, box in enumerate(pred_bounding_box_second):
-          if ix not in self.list_of_unique_instances:
-            continue
-          # box = np.array([x, y, dx, dy, heading_angle, speed, brake, pred_class])   
-          box[5] = speed[speed_iter]
-          speed_iter += 1
+      # TODO: NMS on pred_bounding_box_second
+      # pred_bounding_box_second = self.non_maximum_suppression(pred_bounding_box_second)
+      if DEBUG_SPEED_SECOND:
+        if DEBUG_SAVE_BB and self.step < 100:
+          save_dir = "saves/data/DEBUG"
+          np.save(f'{save_dir}/{self.step}_SECOND.npy', np.array(pred_bounding_box_second, dtype=object), allow_pickle=True)
+          np.save(f'{save_dir}/{self.step}_TF.npy', np.array(pred_bounding_box.cpu(), dtype=object), allow_pickle=True)
+          # np.save(f'{save_dir}/{self.step}_LIDAR_1.npy', np.array(input_data['lidar'][1], dtype=object), allow_pickle=True)
+          np.save(f'{save_dir}/{self.step}_LIDAR.npy', np.array(self.lidar_buffer_with_intensity[-1], dtype=object), allow_pickle=True)
+          # np.save(f'{save_dir}/{self.step}_LIDAR_3.npy', np.array(lidar_bev[-1].cpu(), dtype=object), allow_pickle=True)
+                
+        boxes_corner_rep = [get_bb_corner(box) for box in pred_bounding_box_second]
+        # x,y, extent_x, extent_y, yaw, speed, brake, class
+        # print(boxes_corner_rep)
+        self.bb_buffer_tracking.append(boxes_corner_rep)
+        self.update_bb_buffer_tracking()
+        self.instances = self.match_bb(self.bb_buffer_tracking)  # Associate bounding boxes to instances
+        self.list_of_unique_instances = [l[0] for l in self.instances]      
+        speed, unnormalized_speed = self.get_speed()
+        print(f"Speed predictions: {unnormalized_speed}")
+        if speed:
+          speed = speed[::-1]
+          speed_iter = 0
+          for ix, box in enumerate(pred_bounding_box_second):
+            if ix not in self.list_of_unique_instances:
+              continue
+            # box = np.array([x, y, dx, dy, heading_angle, speed, brake, pred_class])   
+            box[5] = speed[speed_iter]
+            speed_iter += 1
 
       # dict_keys(['name', 'score', 'boxes_lidar', 'pred_labels', 'frame_id'])
       # scores = annos[0]["score"]
@@ -1270,6 +1349,18 @@ class MapAgent(autonomous_agent.AutonomousAgent):
     pos_diff = rotation_matrix.T @ pos_diff
 
     return t_u.algin_lidar(lidar, pos_diff, rot_diff)
+  
+  def align_lidar_with_intensity(self, lidar, x, y, orientation, x_target, y_target, orientation_target):
+    pos_diff = np.array([x_target, y_target, 0.0, 0.0]) - np.array([x, y, 0.0, 0.0])
+    rot_diff = t_u.normalize_angle(orientation_target - orientation)
+
+    # Rotate difference vector from global to local coordinate system.
+    rotation_matrix = np.array([[np.cos(orientation_target), -np.sin(orientation_target), 0.0, 0.0],
+                                [np.sin(orientation_target),
+                                 np.cos(orientation_target), 0.0, 0.0], [0.0, 0.0, 1.0, 0.0], [0.0, 0.0, 0.0, 1.0]])
+    pos_diff = rotation_matrix.T @ pos_diff
+
+    return t_u.algin_lidar_with_intensity(lidar, pos_diff, rot_diff)
 
   def update_stop_box(self, boxes, x, y, orientation, x_target, y_target, orientation_target):
     pos_diff = np.array([x_target, y_target]) - np.array([x, y])

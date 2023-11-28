@@ -140,3 +140,7 @@ carla_0_9_10
 /Experimental_Results
 /tools/proxy_simulator/map_data
 carla/*
+pretrained_models/*
+OpenPCDet/*
+team_code/checkpoints/*
+training_logdir/*

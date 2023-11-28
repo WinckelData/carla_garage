@@ -354,7 +354,11 @@ class PlanT(nn.Module):
 
     # m / s required to drive between waypoint 0.5 and 1.0 second in the
     # future
-    desired_speed = np.linalg.norm(waypoints[int(self.config.carla_fps * 0.5)] - waypoints[self.config.carla_fps]) * 2.0
+    
+    one_second = int(self.config.carla_fps // (self.config.wp_dilation * self.config.data_save_freq))
+    half_second = one_second // 2
+    desired_speed = np.linalg.norm(waypoints[half_second - 1] - waypoints[one_second - 1]) * 2.0
+    # desired_speed = np.linalg.norm(waypoints[int(self.config.carla_fps * 0.5)] - waypoints[self.config.carla_fps]) * 2.0
 
     # default speed of 14.4 km/h
     if is_stuck:

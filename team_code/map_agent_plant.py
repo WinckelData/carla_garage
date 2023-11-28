@@ -519,8 +519,6 @@ class MapAgent(autonomous_agent.AutonomousAgent):
 
     # Preprocess route the same way as during training of PlanT:
     if USE_PERC_PLANT:
-      
-
       route = [list(t_u.inverse_conversion_2d(i[0], result['gps'], result['compass'])) for i in waypoints_hd] # list of list for comperability to the plant_agent
       if len(route) < self.planning_config.num_route_points:
         num_missing = self.planning_config.num_route_points - len(route)
@@ -709,8 +707,6 @@ class MapAgent(autonomous_agent.AutonomousAgent):
                 # box = np.array([x, y, dx, dy, heading_angle, speed, brake, pred_class])   
                 box[5] = speed[speed_iter]
                 speed_iter += 1
-
-
 
           pred_bounding_box_padded = torch.zeros((self.planning_config.max_num_bbs, 8), dtype=torch.float32).to(self.device)
 

@@ -44,8 +44,9 @@ import gzip
 from plant import PlanT
 import sys
 
-OPENPCDET = 1
-DEBUG_FORWARD_PASS_SECOND = 1
+
+OPENPCDET = 1 # TODO: can be removed when cleaning up
+USE_PERC_PLANT = 1 # TODO: can be removed when cleaning up
 
 if OPENPCDET:
   from OpenPCDet.transform_data_new_dataset_intensity import read_bounding_box, transform_bb_to_unified, \
@@ -61,9 +62,10 @@ if OPENPCDET:
   from munkres import Munkres
   from shapely.geometry import Polygon
 
-
 # PCD_PATH = "/home/luis/Desktop/HIWI/carla_garage"
-PCD_PATH = "/mnt/qb/work/geiger/gwb710/carla_garage"
+# PCD_PATH = "/mnt/qb/work/geiger/gwb710/carla_garage"
+# PCD_CFG_PATH = f"{PCD_PATH}/pretrained_models/SECOND/config/second_new.yaml"
+# PCD_CKPT_PATH = f"{PCD_PATH}/pretrained_models/SECOND/LR_0.003/WEIGHT_DECAY_0.001/GRAD_NORM_CLIP_10/ckpt/checkpoint_epoch_80.pth"
 
 # PATH_TO_PLANNING_FILE = f"{PCD_PATH}/pretrained_models/longest6/plant_all_1"
 # Cloud - downloaded
@@ -72,20 +74,17 @@ PCD_PATH = "/mnt/qb/work/geiger/gwb710/carla_garage"
 # PATH_TO_PLANNING_FILE = f"/mnt/qb/work/geiger/gwb710/carla_garage/training_logdir/plant_v08_only_vehicle_lav"
 # Cloud - L6
 # PATH_TO_PLANNING_FILE = f"/mnt/qb/work/geiger/gwb710/carla_garage/training_logdir/plant_v08_only_vehicle"
+
+PCD_CFG_PATH = os.environ.get('PCD_CFG_PATH',"") # f"/mnt/qb/work/geiger/gwb710/OpenPCDet/tools/cfgs/custom_models/second_new.yaml")
+PCD_CKPT_PATH = os.environ.get('PCD_CKPT_PATH',"") # f"/mnt/qb/work/geiger/gwb710/OpenPCDet/output/custom_models/second_new/TMP_TEST_subsampled_data/LR_0.003/WEIGHT_DECAY_0.001/GRAD_NORM_CLIP_10/ckpt/checkpoint_epoch_80.pth")
 PATH_TO_PLANNING_FILE = os.environ.get('PATH_TO_PLANNING_FILE', "")
 
-# PCD_CFG_PATH = f"{PCD_PATH}/pretrained_models/SECOND/config/second_new.yaml"
-PCD_CFG_PATH = f"/mnt/qb/work/geiger/gwb710/OpenPCDet/tools/cfgs/custom_models/second_new.yaml"
 
-# PCD_CKPT_PATH = f"{PCD_PATH}/pretrained_models/SECOND/LR_0.003/WEIGHT_DECAY_0.001/GRAD_NORM_CLIP_10/ckpt/checkpoint_epoch_80.pth"
-PCD_CKPT_PATH = f"/mnt/qb/work/geiger/gwb710/OpenPCDet/output/custom_models/second_new/TMP_TEST_subsampled_data/LR_0.003/WEIGHT_DECAY_0.001/GRAD_NORM_CLIP_10/ckpt/checkpoint_epoch_80.pth"
-
-
-USE_PERC_PLANT = 1
-DET_TH = 0.4
-PCD_DETECTION_THRESHOLD = 0.2
+DET_TH = float(os.environ.get('PCD_DETECTION_THRESHOLD',  0.4))
+PCD_DETECTION_THRESHOLD = float(os.environ.get('PCD_DETECTION_THRESHOLD',  0.2)) 
 ONLY_VEHICLE_BB = int(os.environ.get('ONLY_VEHICLE_BB', 0)) == 1
 TRACKING = int(os.environ.get('TRACKING', 1)) == 1
+HALF_EXTENTS = int(os.environ.get('HALF_EXTENTS', 1)) == 1
 
 # Configure pytorch for maximum performance
 torch.backends.cuda.matmul.allow_tf32 = True
@@ -287,7 +286,6 @@ class MapAgent(autonomous_agent.AutonomousAgent):
       sys.argv = original_args
 
       pcd_args.save_to_file = 0
-      # cfg.root  ändern, cfg.DATA_CONFIG.DATA_PATH und 'DATA_PATH' ! TODO
       dist_test = False
 
       log_dir = path_l(cwd + "/evaluation/results/")
@@ -361,6 +359,24 @@ class MapAgent(autonomous_agent.AutonomousAgent):
 
     assert self.config.lidar_seq_len == self.planning_config.lidar_seq_len
     assert self.config.data_save_freq == self.planning_config.data_save_freq
+    
+    
+    print("\n\n")
+    print("CUSTOM FLAGS:")
+    print(f"\nTRACKING: {TRACKING} ")
+    print(f"DET_TH_SECOND: {PCD_DETECTION_THRESHOLD}")
+    print(f"DET_TH_TF: {DET_TH}")
+    print(f"HALF_EXTENTS: {HALF_EXTENTS}")
+    
+    print(f"\nPCD_CFG_PATH: {PCD_CFG_PATH}")
+    print(f"PCD_CKPT_PATH: {PCD_CKPT_PATH}")
+    print(f"PATH_TO_PLANNING_FILE: {PATH_TO_PLANNING_FILE}")
+    
+    print(f"\nUSE_PERC_PLANT: {USE_PERC_PLANT}")
+    print(f"OPENPCDET: {OPENPCDET}")
+    print(f"ONLY_VEHICLE_BB: {ONLY_VEHICLE_BB}")
+    print("\n\n")
+
     ####### End of new Setup
 
     self.stuck_detector = 0
@@ -634,7 +650,6 @@ class MapAgent(autonomous_agent.AutonomousAgent):
 
       control = carla.VehicleControl(steer=0.0, throttle=0.0, brake=1.0)
       self.control = control
-      # TODO: Inspect tick data
       tick_data = self.tick(input_data)
       # ['rgb', 'compass', 'lidar', 'gps', 'command', 'target_point', 'angle', 'speed']
       # PlanT input:
@@ -772,8 +787,7 @@ class MapAgent(autonomous_agent.AutonomousAgent):
           pred_bounding_box = self.nets[i].convert_features_to_bb_metric(pred_bb_features)
         if self.use_perc_plant:
           pred_bounding_box = self.nets[i].convert_features_to_bb_metric(pred_bb_features)
-          # Filter bounding boxes
-          # TODO enable filtering out light and stop boxes
+          # Filter bounding boxes -> filtering out light and stop boxes
           normal_pred_bounding_box = [box[:-1] for box in pred_bounding_box if box[-1] >= self.det_th ]
           removed_pred_bounding_box = [box[:-1] for box in pred_bounding_box if box[-1] >= self.det_th and box[-2] not in [2,3]]
           
@@ -785,29 +799,6 @@ class MapAgent(autonomous_agent.AutonomousAgent):
           # pred_bounding_box -> List of arrays (each entry is one prediction)
           # pred_bounding_box[0] -> BB: Array of Length 8: x,y, extent_x, extent_y, yaw, speed, brake, class
           # class: 0 -> car, 1 -> walker, 2 -> traffic light, 3 -> stop_sign
-
-          # MATCHING + TRACKING:
-          if DEBUG_SPEED_TF:
-            boxes_corner_rep = [get_bb_corner(box) for box in pred_bounding_box]
-            # print(pred_bounding_box)
-            # print(boxes_corner_rep)
-            
-            self.bb_buffer_tracking.append(boxes_corner_rep)
-            self.update_bb_buffer_tracking()
-            self.instances = self.match_bb(self.bb_buffer_tracking)  # Associate bounding boxes to instances
-            self.list_of_unique_instances = [l[0] for l in self.instances]      
-            speed, unnormalized_speed = self.get_speed()
-            print(f"Speed predictions: {unnormalized_speed}")
-            if speed:
-              speed = speed[::-1]
-              speed_iter = 0
-              for ix, box in enumerate(pred_bounding_box):
-                if ix not in self.list_of_unique_instances:
-                  continue
-                # box = np.array([x, y, dx, dy, heading_angle, speed, brake, pred_class])   
-                box[5] = speed[speed_iter]
-                speed_iter += 1
-            
 
           pred_bounding_box_padded = torch.zeros((self.planning_config.max_num_bbs, 8), dtype=torch.float32).to(self.device)
 
@@ -886,11 +877,10 @@ class MapAgent(autonomous_agent.AutonomousAgent):
                                    gt_speed=gt_velocity,
                                    gt_wp=pred_wp_1,
                                    wp_selected=wp_selected)
-    if OPENPCDET and DEBUG_FORWARD_PASS_SECOND:
+    if OPENPCDET:
       # copied from Tim
 
       lidar_pc = PointCloud(self.lidar_buffer_with_intensity[-1])
-      # TODO: confirm this works as planned
       lidar_unified = transform_pc_to_unified(lidar_pc)
       pc = lidar_unified.pointcloud
       # if self.cfg.EXCLUDE_LIDAR_BACK: # remove all with negative x coordinates (since coordinates in uniformed coordinates)
@@ -922,7 +912,7 @@ class MapAgent(autonomous_agent.AutonomousAgent):
             dy /= 2
           heading_angle = t_u.normalize_angle(heading_angle)
           brake = 0
-          speed = 0 # TODO
+          speed = 0 
           pred_class_name = frame["name"][i]
           if pred_class_name in ["Car", "Cyclists"]:
             pred_class = 0
@@ -965,9 +955,11 @@ class MapAgent(autonomous_agent.AutonomousAgent):
         return filtered_boxes
       """
       # TRACKING + MATCHING for speed prediction
+
       if TRACKING:
         boxes_corner_rep = [get_bb_corner(box) for box in pred_bounding_box_second]
         # x,y, extent_x, extent_y, yaw, speed, brake, class
+        """
         if DEBUG_SAVE_BB and self.step < 100:
           save_dir = "saves/data/DEBUG"
           np.save(f'{save_dir}/{self.step}_SECOND.npy', np.array(pred_bounding_box_second, dtype=object), allow_pickle=True)
@@ -975,7 +967,7 @@ class MapAgent(autonomous_agent.AutonomousAgent):
           # np.save(f'{save_dir}/{self.step}_LIDAR_1.npy', np.array(input_data['lidar'][1], dtype=object), allow_pickle=True)
           np.save(f'{save_dir}/{self.step}_LIDAR.npy', np.array(self.lidar_buffer_with_intensity[-1], dtype=object), allow_pickle=True)
           # np.save(f'{save_dir}/{self.step}_LIDAR_3.npy', np.array(lidar_bev[-1].cpu(), dtype=object), allow_pickle=True)
-                
+        """     
         self.bb_buffer_tracking.append(boxes_corner_rep)
         self.update_bb_buffer_tracking()
         self.instances = self.match_bb(self.bb_buffer_tracking)  # Associate bounding boxes to instances
@@ -992,18 +984,6 @@ class MapAgent(autonomous_agent.AutonomousAgent):
             box[5] = speed[speed_iter]
             speed_iter += 1
 
-      # dict_keys(['name', 'score', 'boxes_lidar', 'pred_labels', 'frame_id'])
-      # scores = annos[0]["score"]
-      # label_names = annos[0]["name"]
-      # label_int = annos[0]["pred_labels"] # 1 -> "Car", 2 -> "Pedestrian", 3 -> "Cyclist"
-      # x, y, z, dx, dy, dz, heading_angle = frame['boxes_lidar'][i]
-      # TODO: Bring in correct format, potentially need to transform coordinates here as well...
-      # Format of transfuser output:
-        # pred_bounding_box -> List of arrays (each entry is one prediction)
-        # pred_bounding_box[0] -> BB: Array of Length 8: x,y, width, height, yaw, speed, class, score
-        # Score: 
-
-  
       # Padding
       pred_bounding_box_padded_second = torch.zeros((self.planning_config.max_num_bbs, 8), dtype=torch.float32).to(self.device)
 
@@ -1109,7 +1089,6 @@ class MapAgent(autonomous_agent.AutonomousAgent):
       pred_light_hazard = torch.IntTensor([[pred_light_hazard]]).to("cuda:0")
       pred_stop_sign_hazard = torch.IntTensor([[pred_stop_sign_hazard]]).to("cuda:0")
 
-      # TODO: Compare pred_bounding_box_padded and pred_bounding_box_padded_second
       pred_wps = []
       pred_target_speeds = []
       pred_checkpoints = [] 
@@ -1498,7 +1477,7 @@ class MapAgent(autonomous_agent.AutonomousAgent):
         distance_vector_m2 = box_m1[0:2] - box_m2[0:2]
         # Our predictions happen at 100ms intervals. So we need to multiply by 10 to get m/s scale.
         velocity_m2 = np.linalg.norm(distance_vector_m2) / (
-                    0.5 * self.lidar_freq)  # TODO I changed the freq ad hoc to half
+                    0.5 * self.lidar_freq)  # TODO Tim changed the freq ad hoc to half -> Does this make sense here???
         
         unnormalized_speed.append(velocity_m2)
         

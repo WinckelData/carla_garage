@@ -28,9 +28,11 @@ if DEBUG_SPEED_TF:
 # Local:
 # PERC_PATH_TO_CONF_FILE = '/home/luis/Desktop/HIWI/carla_garage/pretrained_models/longest6/tfpp_all_0'
 # Cloud - L6:
-PERC_PATH_TO_CONF_FILE = '/mnt/qb/work/geiger/gwb710/carla_garage/pretrained_models/longest6/tfpp_all_0'
+# PERC_PATH_TO_CONF_FILE = '/mnt/qb/work/geiger/gwb710/carla_garage/pretrained_models/longest6/tfpp_all_0'
 # Cloud - LAV:
 # PERC_PATH_TO_CONF_FILE = '/mnt/qb/work/geiger/gwb710/carla_garage/pretrained_models/lav/tfpp_02_05_withheld_0/'
+
+PERC_PATH_TO_CONF_FILE = os.environ.get("PERC_PATH_TO_CONF_FILE","")
 
 # PATH_TO_SECOND_CKPT = "/mnt/qb/work/geiger/gwb710/OpenPCDet/output/custom_models/second_new/TMP_TEST_subsampled_data/LR_0.001/WEIGHT_DECAY_0.001/GRAD_NORM_CLIP_35/ckpt/checkpoint_epoch_80.pth"
 
@@ -278,7 +280,8 @@ class PerceptionPlanTAgent(DataAgent):
       # TODO: Create the same state to append as done i map_agent.py#418
       state = self._vehicle.get_transform()
       compass = tick_data_two["compass"]
-      state = np.array([state.location.x, state.location.y, t_u.normalize_angle(compass), tick_data_two['speed']])
+      state = np.array([state.location.x, state.location.y, t_u.normalize_angle(compass), tick_data_two['speed'].item()])
+      
       self.state_log.append(state)
 
     if self.config.debug:

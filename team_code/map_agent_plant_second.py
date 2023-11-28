@@ -572,11 +572,6 @@ class MapAgent(autonomous_agent.AutonomousAgent):
     self.ukf.predict(steer=self.control.steer, throttle=self.control.throttle, brake=self.control.brake)
     self.ukf.update(np.array([gps_pos[0], gps_pos[1], t_u.normalize_angle(compass), speed]))
     filtered_state = self.ukf.x
-    # print(f"state: {filtered_state}")
-    # 4-d array x,y,z, yaw?
-    # filtered_state[3]:
-    # 0 at start when driving to right
-    # 
     self.state_log.append(filtered_state)
 
     result['gps'] = filtered_state[0:2]
@@ -610,7 +605,6 @@ class MapAgent(autonomous_agent.AutonomousAgent):
     ego_local_point = t_u.inverse_conversion_2d(local_point, result['gps'], result['compass'])
 
     result['angle'] = -math.degrees(math.atan2(-ego_local_point[1], ego_local_point[0])) / 90.0
-
     result['speed'] = torch.FloatTensor([speed]).to(self.device, dtype=torch.float32)
 
     # Preprocess route the same way as during training of PlanT:
@@ -817,7 +811,6 @@ class MapAgent(autonomous_agent.AutonomousAgent):
       else:
         raise ValueError('The chosen vision backbone does not exist. The options are: transFuser, aim, bev_encoder')
 
-
       if not self.use_perc_plant:
         if self.config.use_wp_gru:
           if self.config.multi_wp_output:
@@ -841,9 +834,6 @@ class MapAgent(autonomous_agent.AutonomousAgent):
                                       self.stop_sign_controller):
       # We average bounding boxes by using non-maximum suppression on the set of all detected boxes.
       bbs_vehicle_coordinate_system = t_u.non_maximum_suppression(bounding_boxes, self.config.iou_treshold_nms)
-
-      # if bounding_boxes:
-      #   print(bounding_boxes)
 
       self.bb_buffer.append(bbs_vehicle_coordinate_system)
     else:
@@ -879,7 +869,6 @@ class MapAgent(autonomous_agent.AutonomousAgent):
                                    wp_selected=wp_selected)
     if OPENPCDET:
       # copied from Tim
-
       lidar_pc = PointCloud(self.lidar_buffer_with_intensity[-1])
       lidar_unified = transform_pc_to_unified(lidar_pc)
       pc = lidar_unified.pointcloud
@@ -955,7 +944,6 @@ class MapAgent(autonomous_agent.AutonomousAgent):
         return filtered_boxes
       """
       # TRACKING + MATCHING for speed prediction
-
       if TRACKING:
         boxes_corner_rep = [get_bb_corner(box) for box in pred_bounding_box_second]
         # x,y, extent_x, extent_y, yaw, speed, brake, class
@@ -998,81 +986,9 @@ class MapAgent(autonomous_agent.AutonomousAgent):
           pred_bounding_box_padded_second[:self.planning_config.max_num_bbs, :] = pred_bounding_box_second[:self.planning_config.max_num_bbs]
 
       pred_bounding_box_padded_second = pred_bounding_box_padded_second.unsqueeze(0)
-      
-
-      
-    """       
-      for det in det_labels_car:
-          det["yaw"] = normalize_angle(det["yaw"])
-      detection_labels_car = det_labels_car
-
-      ########## detection_labels_car = self.non_maximum_suppression(detection_labels_car)
-
-      bounding_boxes = detection_labels_car
-      corners = [get_bb_corner(box) for box in bounding_boxes]
-      conf_scores = [box["score"] for box in bounding_boxes]
-
-      filtered_boxes = []
-      # bounding_boxes = np.array(list(itertools.chain.from_iterable(bounding_boxes)), dtype=np.object)
-
-      if len(bounding_boxes) == 0:  # If no bounding boxes are detected can't do NMS
-          return filtered_boxes
-
-      confidences_indices = np.argsort(conf_scores)
-      while (len(confidences_indices) > 0):
-          idx = confidences_indices[-1]
-          current_bb_corner = corners[idx]
-          current_bb_dict = bounding_boxes[idx]
-          filtered_boxes.append(current_bb_dict)
-          confidences_indices = confidences_indices[:-1]  # Remove last element from the list
-
-          if (len(confidences_indices) == 0):
-              break
-
-          for idx2 in deepcopy(confidences_indices):
-              if (self.iou_bbs(current_bb_corner, corners[idx2]) > iou_treshhold):  # Remove BB from list
-                  confidences_indices = confidences_indices[confidences_indices != idx2]
-
-        detection_labels_car = filtered_boxes
-
-
-        boxes_corner_rep = [get_bb_corner(box) for box in detection_labels_car]
-
-        ########## car_instances = self.finalize_instances(speed, detection_labels_car, boxes_corner_rep)
-
-        bbs_corner = boxes_corner_rep
-        bbs = detection_labels_car
-        label_final = []
-        label_final.append({'class': 'Car', 'extent': [1.5107464790344238, 4.901683330535889, 2.128324270248413],
-                            'position': [-1.3, 0.0, -2.5], 'yaw': 0, 'num_points': -1, 'distance': -1, 'speed': 0.0,
-                            'brake': 0.0, 'id': 99999})
-
-        if speed == False:
-            # speed = [0.0]*len(bbs)
-            return label_final
-
-        speed = speed[::-1]
-        speed_iter = 0
-        for ix, box in enumerate(bbs):
-            if ix not in self.list_of_unique_instances:
-                continue
-
-            label_final.append({})
-            label_final[-1]['class'] = 'Car'
-            label_final[-1]['extent'] = box["extent"]
-            label_final[-1]['position'] = box["position"]
-            # vehicles are predicted in vehicle coordinate system but we need it in lidar coordinate system
-            label_final[-1]['yaw'] = box["yaw"]
-            label_final[-1]['speed'] = speed[speed_iter]
-            label_final[-1]['id'] = ix
-            speed_iter += 1
-            label_final[-1]["score"] = box["score"] 
-            label_final[-1]["distance"] = box["distance"]
-
-        car_instances = label_final
-      """
 
     if USE_PERC_PLANT or OPENPCDET:
+      # TODO: dont use torch.tensor on a tensor, rather use sourceTensor.clone().detach()
       speed = torch.tensor(gt_velocity, dtype=torch.float32).to(self.device).unsqueeze(0)
       target_point = torch.tensor(tick_data['target_point'], dtype=torch.float32).to(self.device)
       route = tick_data['route']
@@ -1094,6 +1010,7 @@ class MapAgent(autonomous_agent.AutonomousAgent):
       pred_checkpoints = [] 
       pred_bbs = []
 
+      # TODO: Remove Debug prints when finishing the code
       # print("\n\n\n")
       # print(f"Step: {self.step}")
       # print(f"target_point: {target_point[0]}")
@@ -1101,7 +1018,6 @@ class MapAgent(autonomous_agent.AutonomousAgent):
       # print(f"pred_stop_sign_hazard: {pred_stop_sign_hazard.item()}")
       # print(f"Junction: {junction.item()}")
       # print(f"velocity: {velocity.item()}")
-      
       
       for i in range(self.planning_model_count):
         pred_wp, pred_target_speed, pred_checkpoint, pred_bb = self.planning_nets[i].forward(bounding_boxes=pred_bounding_box_padded_second,# pred_bounding_box_padded, # bounding_boxes_padded,
@@ -1152,7 +1068,6 @@ class MapAgent(autonomous_agent.AutonomousAgent):
         steer, throttle, brake = self.planning_nets[0].control_pid(self.pred_wp, speed, False)
       # print(f"Control: Steer - {steer}, Throttle - {throttle}, Brake - {brake}")
     else:
-      # print("Should NOT GET HERE")
       if self.config.use_wp_gru:
         self.pred_wp = torch.stack(pred_wps, dim=0).mean(dim=0)
 

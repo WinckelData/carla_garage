@@ -555,7 +555,6 @@ class MapAgent(autonomous_agent.AutonomousAgent):
 
       control = carla.VehicleControl(steer=0.0, throttle=0.0, brake=1.0)
       self.control = control
-      # TODO: Inspect tick data
       tick_data = self.tick(input_data)
       # ['rgb', 'compass', 'lidar', 'gps', 'command', 'target_point', 'angle', 'speed']
       # PlanT input:
@@ -684,8 +683,7 @@ class MapAgent(autonomous_agent.AutonomousAgent):
           pred_bounding_box = self.nets[i].convert_features_to_bb_metric(pred_bb_features)
         if self.use_perc_plant:
           pred_bounding_box = self.nets[i].convert_features_to_bb_metric(pred_bb_features)
-          # Filter bounding boxes
-          # TODO enable filtering out light and stop boxes
+          # Filter bounding boxes -> filtering out light and stop boxes
           normal_pred_bounding_box = [box[:-1] for box in pred_bounding_box if box[-1] >= self.det_th ]
           removed_pred_bounding_box = [box[:-1] for box in pred_bounding_box if box[-1] >= self.det_th and box[-2] not in [2,3]]
           
@@ -788,6 +786,7 @@ class MapAgent(autonomous_agent.AutonomousAgent):
                                    gt_wp=pred_wp_1,
                                    wp_selected=wp_selected)
     if USE_PERC_PLANT:
+      # TODO: dont use torch.tensor on a tensor, rather use sourceTensor.clone().detach()
       speed = torch.tensor(gt_velocity, dtype=torch.float32).to(self.device).unsqueeze(0)
       target_point = torch.tensor(tick_data['target_point'], dtype=torch.float32).to(self.device)
       route = tick_data['route']
@@ -808,6 +807,7 @@ class MapAgent(autonomous_agent.AutonomousAgent):
       pred_checkpoints = []
       pred_bbs = []
 
+      # TODO: Remove Debug prints when finishing the code
       # print("\n\n\n")
       # print(f"Step: {self.step}")
       # print(f"target_point: {target_point[0]}")
@@ -866,7 +866,6 @@ class MapAgent(autonomous_agent.AutonomousAgent):
         steer, throttle, brake = self.planning_nets[0].control_pid(self.pred_wp, speed, False)
       # print(f"Control: Steer - {steer}, Throttle - {throttle}, Brake - {brake}")
     else:
-      # print("Should NOT GET HERE")
       if self.config.use_wp_gru:
         self.pred_wp = torch.stack(pred_wps, dim=0).mean(dim=0)
 
@@ -1176,7 +1175,7 @@ class MapAgent(autonomous_agent.AutonomousAgent):
         distance_vector_m2 = box_m1[0:2] - box_m2[0:2]
         # Our predictions happen at 100ms intervals. So we need to multiply by 10 to get m/s scale.
         velocity_m2 = np.linalg.norm(distance_vector_m2) / (
-                    0.5 * self.lidar_freq)  # TODO I changed the freq ad hoc to half
+                    0.5 * self.lidar_freq)  # TODO Tim changed the freq ad hoc to half -> Does this make sense here???
         
         unnormalized_speed.append(velocity_m2)
         

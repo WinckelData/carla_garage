@@ -43,11 +43,16 @@ import gzip
 from plant import PlanT
 
 # PATH_TO_PLANNING_FILE = "/home/luis/Desktop/HIWI/carla_garage/pretrained_models/longest6/plant_all_1"
-PATH_TO_PLANNING_FILE = "/mnt/qb/work/geiger/gwb710/carla_garage/pretrained_models/longest6/plant_all_1"
+# PATH_TO_PLANNING_FILE = "/mnt/qb/work/geiger/gwb710/carla_garage/pretrained_models/longest6/plant_all_1"
+PATH_TO_PLANNING_FILE = os.environ.get('PATH_TO_PLANNING_FILE',"")
 USE_PERC_PLANT = 1
 DET_TH = 0.4
 ONLY_VEHICLE_BB = int(os.environ.get('ONLY_VEHICLE_BB', 0)) == 1
+TRACKING = int(os.environ.get('TRACKING', 1)) == 1
 
+if TRACKING:
+  from munkres import Munkres
+  from shapely.geometry import Polygon
 # Configure pytorch for maximum performance
 torch.backends.cuda.matmul.allow_tf32 = True
 torch.backends.cudnn.benchmark = True
@@ -176,6 +181,7 @@ class MapAgent(autonomous_agent.AutonomousAgent):
 
     # Load the config saved during training
     with open(os.path.join(path_to_conf_file, 'config.pickle'), 'rb') as args_file:
+      print(f"Loading config from: {path_to_conf_file}")
       loaded_config = pickle.load(args_file)
 
     # Generate new config for the case that it has new variables.
@@ -250,7 +256,7 @@ class MapAgent(autonomous_agent.AutonomousAgent):
     self.planning_model_count = 0
     
     for file in os.listdir(planning_path_to_conf_file):
-      if file.endswith('.pth'):
+      if file.endswith('model_0046.pth'):
         self.planning_model_count += 1
         print("Loading PlanT:")
         print(os.path.join(planning_path_to_conf_file, file))
@@ -266,6 +272,23 @@ class MapAgent(autonomous_agent.AutonomousAgent):
 
     assert self.config.lidar_seq_len == self.planning_config.lidar_seq_len
     assert self.config.data_save_freq == self.planning_config.data_save_freq
+    
+    if TRACKING:
+      self.lidar_freq = 1.0 / 10.0  # In seconds
+      # self.simulator_time_step = (1.0 / 20.0)
+      self.max_num_bb_forecast = 4  # Number of consecutive bb detection needed for a forecast
+      self.min_num_bb_forecast = 4  # Minimum number of consecutive bb detection needed for a forecast
+      self.bb_buffer_tracking = deque(maxlen=self.max_num_bb_forecast)
+      for i in range(self.max_num_bb_forecast - self.min_num_bb_forecast):
+          self.bb_buffer_tracking.append([])  # Fill in empty bounding boxes for the optional timesteps
+
+    print("\n\n")
+    print("CUSTOM FLAGS:")
+    print(f"TRACKING: {TRACKING} ")
+    print(f"ONLY_VEHICLE_BB: {ONLY_VEHICLE_BB}")
+    print(f"DET_TH_TF: {DET_TH}")
+    print(f"USE_PERC_PLANT: {USE_PERC_PLANT}")
+    
     ####### End of new Setup
 
     self.stuck_detector = 0
@@ -671,6 +694,26 @@ class MapAgent(autonomous_agent.AutonomousAgent):
           else:
             pred_bounding_box = normal_pred_bounding_box
           
+          if TRACKING:
+            boxes_corner_rep = [get_bb_corner(box) for box in pred_bounding_box]
+            self.bb_buffer_tracking.append(boxes_corner_rep)
+            self.update_bb_buffer_tracking()
+            self.instances = self.match_bb(self.bb_buffer_tracking)  # Associate bounding boxes to instances
+            self.list_of_unique_instances = [l[0] for l in self.instances]      
+            speed, unnormalized_speed = self.get_speed()
+            print(f"Speed predictions: {unnormalized_speed}")
+            if speed:
+              speed = speed[::-1]
+              speed_iter = 0
+              for ix, box in enumerate(pred_bounding_box):
+                if ix not in self.list_of_unique_instances:
+                  continue
+                # box = np.array([x, y, dx, dy, heading_angle, speed, brake, pred_class])   
+                box[5] = speed[speed_iter]
+                speed_iter += 1
+
+
+
           pred_bounding_box_padded = torch.zeros((self.planning_config.max_num_bbs, 8), dtype=torch.float32).to(self.device)
 
           if len(pred_bounding_box) > 0:
@@ -1030,7 +1073,173 @@ class MapAgent(autonomous_agent.AutonomousAgent):
       del self.planning_nets
       del self.planning_config
 
+  def update_bb_buffer_tracking(self):
+    if (len(self.state_log) < 2):  # Start after we have the second measurement
+        return
 
+    current_state = np.array(self.state_log[-1])
+    R_curr = torch.tensor([[np.cos(current_state[2]), -np.sin(current_state[2])],
+                          [np.sin(current_state[2]), np.cos(current_state[2])]])
+
+    for j in range(len(self.bb_buffer_tracking[-1])):  # over detections in last buffer timestep (new detections)
+        for k in range(self.bb_buffer_tracking[-1][j].shape[0]):  # Loop over points of the box
+            self.bb_buffer_tracking[-1][j][k, 1] = -1 * self.bb_buffer_tracking[-1][j][k, 1]  # make y coordinate to the right
+            self.bb_buffer_tracking[-1][j][k, :2] = torch.tensor(current_state[0:2].copy()) + (
+                              R_curr @ self.bb_buffer_tracking[-1][j][k, :2])
+
+
+  def match_bb(self, buffer_bb):
+    instances = []
+    # We only start after we have 4 time steps.
+    if (len(buffer_bb) < self.max_num_bb_forecast):
+        return instances
+
+    all_indices = []
+    for i in range(len(buffer_bb) - 1):
+        if (len(buffer_bb[i]) == 0 or len(buffer_bb[i + 1]) == 0):
+            # Timestep without bounding boxes so there is no match
+            all_indices.append([])
+            continue
+
+        matrix_size = max(len(buffer_bb[i]), len(buffer_bb[i + 1]))
+
+        # Initialize with a large value so that bb that don't exist get matched last.
+        ious = np.ones((matrix_size, matrix_size)) * 10.0
+        for j in range(len(buffer_bb[i])):
+            for k in range(len(buffer_bb[i + 1])):
+                # Invert IOU here to convert value to costs
+                ious[j, k] = 1.0 - iou_bbs(buffer_bb[i][j], buffer_bb[i + 1][k])
+
+        m = Munkres()
+        indexes = m.compute(ious)
+        all_indices.append(indexes)
+    
+    inv_instances = []
+    # Create instance for every newest bb.
+    for i in range(len(buffer_bb[-1]) - 1, -1, -1):
+        instance = [i]
+        write = True
+        continue_adding_bbs = True
+        last_timestep_index = i
+        # Loops over available timesteps starting with the latest
+        for j in range(len(buffer_bb) - 1, 0, -1):
+            if (continue_adding_bbs == False):
+                break
+
+            # There was a timestep with no matches / no bbs.
+            if (len(all_indices[j - 1]) == 0):
+                # If we have enough bb write the instance, else delete it.
+                if (len(instance) < self.min_num_bb_forecast):
+                    write = False
+                break
+            # Loops over pairs for each timestep
+            for k in range(len(all_indices[j - 1])):
+                # Find the match for the current bb
+                if (all_indices[j - 1][k][1] == last_timestep_index):
+                    # Check if the matched bb actually exists
+                    if (all_indices[j - 1][k][0] >= len(buffer_bb[j - 1])):
+                        # This instance has a timestep without a bb
+                        if (len(instance) >= self.min_num_bb_forecast):
+                            # Stop instance here and write it
+                            continue_adding_bbs = False
+                            break
+                        else:
+                            # There are less total bb than needed. Delete instance!
+                            write = False
+                    else:
+                        instance.append(all_indices[j - 1][k][0])
+                        last_timestep_index = all_indices[j - 1][k][0]
+                        break
+
+        if (write == True):
+            inv_instances.append(instance)
+    return inv_instances
+
+  def get_speed(self):
+    # We only start after we have 4 time steps.
+    if (len(self.bb_buffer_tracking) < self.max_num_bb_forecast):
+        return False, False
+
+    speed = []
+    unnormalized_speed = []
+
+    self.instance_future_bb = []
+    for i in range(len(self.instances)):
+      
+        bb_array = self.get_bb_of_instance(i)  # Format of BB: [x,y, orientation, speed, extent_x, extent_y]
+
+        # 0 index is the oldest timestep
+        # Ids are from old -> new
+        box_m1 = bb_array[-1]  # Most recent bounding box
+        box_m2 = bb_array[-2]
+
+        distance_vector_m2 = box_m1[0:2] - box_m2[0:2]
+        # Our predictions happen at 100ms intervals. So we need to multiply by 10 to get m/s scale.
+        velocity_m2 = np.linalg.norm(distance_vector_m2) / (
+                    0.5 * self.lidar_freq)  # TODO I changed the freq ad hoc to half
+        
+        unnormalized_speed.append(velocity_m2)
+        
+        if velocity_m2 < 0.01: velocity_m2 = 0.0
+        if velocity_m2 > 8 : velocity_m2 = 8.0
+        speed.append(velocity_m2)
+
+    return speed, unnormalized_speed
+    
+  def get_bb_of_instance(self, instance_id):
+      '''
+      Args:
+          instance_id: The instance if of the bounding box in the self.instances array
+      Returns:
+          List of bounding boxes belonging to that instance. The first item is the oldest bb, the last one is the most recent one.
+          An instance can have a varying number of past bounding boxes, so accessing the array from back to front is advised.
+          Format of BB: [x,y, orientation, speed, extent_x, extent_y]
+      '''
+      if (len(self.bb_buffer_tracking) < self.max_num_bb_forecast):  # We only start after we have 4 time steps.
+          return []
+      instance_bbs = []
+
+      for j in range(self.max_num_bb_forecast):  # From oldest to newest BB
+          inv_timestep = (self.max_num_bb_forecast - 1) - j
+          if (len(self.instances[instance_id]) <= inv_timestep):
+              continue  # This instance does not have a bb at this timestep
+          bb = self.bb_buffer_tracking[j][self.instances[instance_id][inv_timestep]]
+
+          instance_bbs.append(np.array([bb[4, 0], bb[4, 1]]))
+
+      return instance_bbs
+
+
+def get_bb_corner(box):
+  ext = box[2:4]
+  pos = box[0:2]
+  yaw = box[4]
+  r = np.array(([np.cos(yaw), -np.sin(yaw)],
+                [np.sin(yaw), np.cos(yaw)]))
+
+  p1 = pos + r @ ([-0.5, -0.5] * ext)
+  p2 = pos + r @ ([0.5, -0.5] * ext)
+  p3 = pos + r @ ([0.5, 0.5] * ext)
+  p4 = pos + r @ ([-0.5, 0.5] * ext)
+  p5 = pos
+  p6 = pos + r @ (np.array([0, ext[1] * 1 * 0.5]))
+
+  two_d_bb = torch.from_numpy(np.array([p1, p2, p3, p4, p5, p6]))
+
+  # add global pos - nope
+  # two_d_bb = two_d_bb + self.state_log[-1][:2]
+
+  three_d_bb = np.c_[two_d_bb, np.ones(6)]
+  return torch.tensor(three_d_bb).squeeze()
+
+
+def iou_bbs(bb1, bb2):
+    a = Polygon([(bb1[0, 0], bb1[0, 1]), (bb1[1, 0], bb1[1, 1]), (bb1[2, 0], bb1[2, 1]), (bb1[3, 0], bb1[3, 1])])
+    b = Polygon([(bb2[0, 0], bb2[0, 1]), (bb2[1, 0], bb2[1, 1]), (bb2[2, 0], bb2[2, 1]), (bb2[3, 0], bb2[3, 1])])
+    intersection_area = a.intersection(b).area
+    union_area = a.union(b).area
+    iou = intersection_area / union_area
+    return iou
 # Filter Functions
 def bicycle_model_forward(x, dt, steer, throttle, brake):
   # Kinematic bicycle model.
@@ -1124,3 +1333,4 @@ def residual_measurement_h(a, b):
   y = a - b
   y[2] = t_u.normalize_angle(y[2])
   return y
+

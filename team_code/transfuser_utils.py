@@ -112,6 +112,23 @@ def lidar_to_ego_coordinate(config, lidar):
 
   return ego_lidar
 
+def lidar_to_ego_coordinate_with_intensity(config, lidar):
+  """
+  Converts the LiDAR points given by the simulator into the ego agents
+  coordinate system BUT KEEPS INTENSITY
+  :param config: GlobalConfig, used to read out lidar orientation and location
+  :param lidar: the LiDAR point cloud as provided in the input of run_step
+  :return: lidar where the points are w.r.t. 0/0/0 of the car and the carla
+  coordinate system.
+  """
+  yaw = np.deg2rad(config.lidar_rot[2])
+  rotation_matrix = np.array([[np.cos(yaw), -np.sin(yaw), 0.0, 0.0], [np.sin(yaw), np.cos(yaw), 0.0, 0.0 ], [0.0, 0.0, 1.0, 0.0], [0.0, 0.0, 0.0, 1.0]])
+
+  translation = np.array(config.lidar_pos + [0])
+  # The double transpose is a trick to compute all the points together.
+  ego_lidar = (rotation_matrix @ lidar[1][:, :4].T).T + translation
+
+  return ego_lidar
 
 def algin_lidar(lidar, translation, yaw):
   """
@@ -124,6 +141,22 @@ def algin_lidar(lidar, translation, yaw):
   """
 
   rotation_matrix = np.array([[np.cos(yaw), -np.sin(yaw), 0.0], [np.sin(yaw), np.cos(yaw), 0.0], [0.0, 0.0, 1.0]])
+
+  aligned_lidar = (rotation_matrix.T @ (lidar - translation).T).T
+
+  return aligned_lidar
+
+def algin_lidar_with_intensity(lidar, translation, yaw):
+  """
+  Translates and rotates a LiDAR into a new coordinate system.
+  Rotation is inverse to translation and yaw WITH INTENSITY
+  :param lidar: numpy LiDAR point cloud (N,3)
+  :param translation: translations in meters
+  :param yaw: yaw angle in radians
+  :return: numpy LiDAR point cloud in the new coordinate system.
+  """
+
+  rotation_matrix = np.array([[np.cos(yaw), -np.sin(yaw), 0.0, 0.0], [np.sin(yaw), np.cos(yaw), 0.0, 0.0], [0.0, 0.0, 1.0, 0.0], [0.0, 0.0, 0.0, 1.0]])
 
   aligned_lidar = (rotation_matrix.T @ (lidar - translation).T).T
 

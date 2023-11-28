@@ -23,7 +23,7 @@ if not newlib in os.environ['LD_LIBRARY_PATH']:
 
 
 def create_run_eval_bash(bash_save_dir, results_save_dir, route_path, route, checkpoint, logs_save_dir,
-                         carla_tm_port_start, benchmark, carla_root, only_vehicle_bb=0, perc_bb=0, perc_light=0, perc_stop=0):
+                         carla_tm_port_start, benchmark, carla_root, path_to_tf_conf, only_vehicle_bb=0, perc_bb=0, perc_light=0, perc_stop=0):
   Path(f'{results_save_dir}').mkdir(parents=True, exist_ok=True)
   with open(f'{bash_save_dir}/eval_{route}.sh', 'w', encoding='utf-8') as rsh:
     rsh.write(f'''\
@@ -69,6 +69,7 @@ export ONLY_VEHICLE_BB={only_vehicle_bb}
 export PERC_BB={perc_bb}
 export PERC_LIGHT={perc_light}
 export PERC_STOP={perc_stop}
+export PERC_PATH_TO_CONF_FILE={path_to_tf_conf}
 """)
     rsh.write('''
 python3 ${LEADERBOARD_ROOT}/leaderboard/leaderboard_evaluator_local.py \
@@ -133,18 +134,31 @@ def get_num_jobs(job_name, benchmark, username):
 
 def main():
   num_repetitions = 3
-  experiment = 'EVAL' 
-  model_dir = '/mnt/qb/work/geiger/gwb710/carla_garage/pretrained_models/longest6/plant_all_1'
+  experiment = 'PP_downloaded_TRACKING'
+  model_dir_plant_downloaded = '/mnt/qb/work/geiger/gwb710/carla_garage/pretrained_models/longest6/plant_all_1'
+  model_dict = {
+    "lav": {
+        "model_dir_plant":"/mnt/qb/work/geiger/gwb710/carla_garage/training_logdir/plant_v08_only_vehicle_lav",
+#        "model_dir_plant":"/mnt/qb/work/geiger/gwb710/carla_garage/training_logdir/plant_v08_default_lav",
+        "path_to_tf_conf":'/mnt/qb/work/geiger/gwb710/carla_garage/pretrained_models/lav/tfpp_02_05_withheld_0/',
+    },
+    "longest6": {
+        "model_dir_plant":"/mnt/qb/work/geiger/gwb710/carla_garage/training_logdir/plant_v08_only_vehicle",
+#        "model_dir_plant":"/mnt/qb/work/geiger/gwb710/carla_garage/training_logdir/plant_v08_default",
+        "path_to_tf_conf":'/mnt/qb/work/geiger/gwb710/carla_garage/pretrained_models/longest6/tfpp_all_0',
+    }
+  }
+  
   code_root = '/mnt/qb/work/geiger/gwb710/carla_garage'
   carla_root = '/mnt/qb/work/geiger/gwb710/carla_garage/carla'
-  partition = 'gpu-2080ti-preemptable  '
+  partition = 'gpu-2080ti'
   username = 'gwb710'
-  epochs = ["model_0046"]# ,'model_0030']
-  benchmarks = ["longest6"]# ["lav", "longest6"]
-  grid_only_vehicle_bb = [0] #[0,1]
-  grid_perc_bb = [1] #[0,1]
+  epochs = ["model_0046"]
+  benchmarks = ["lav", "longest6"] 
+  grid_only_vehicle_bb = [0,1] #[0,1]
+  grid_perc_bb = [1] #[0,1]s
   grid_perc_light = [1]
-  grid_perc_stop = [0]
+  grid_perc_stop = [1]
   benchmark_length_dict = {"lav": 16*num_repetitions, "longest6": 36*num_repetitions}
   benchmark_length = sum([benchmark_length_dict[benchmark] for benchmark in benchmarks])
   total_num_evals_runs = len(benchmarks) * len(grid_only_vehicle_bb) * len(grid_perc_bb) * len(grid_perc_light) * len(grid_perc_stop)   
@@ -155,6 +169,11 @@ def main():
   meta_jobs = {}
     
   for benchmark in benchmarks:
+    model_dir_plant = model_dict[benchmark]["model_dir_plant"]
+    path_to_tf_conf = model_dict[benchmark]["path_to_tf_conf"]
+    # TODO: uncomment the following line
+    # model_dir_plant = model_dir_plant_downloaded
+    
     for only_vehicle_bb in grid_only_vehicle_bb:
       for perc_bb in grid_perc_bb:
         for perc_light in grid_perc_light:
@@ -204,14 +223,16 @@ def main():
               copy_model = True
 
               if copy_model:
+                print(f"Using model: {model_dir_plant}/{epoch}.pth")
                 # copy checkpoint to my folder
                 cmd = f'mkdir -p team_code/checkpoints/{checkpoint_new_name}'
                 os.system(cmd)
-                # cmd = f'cp {model_dir}/{checkpoint}/config.pickle team_code/checkpoints/{checkpoint_new_name}/'
-                cmd = f'cp {model_dir}/config.pickle team_code/checkpoints/{checkpoint_new_name}/'
+                # cmd = f'cp {model_dir_plant}/{checkpoint}/config.pickle team_code/checkpoints/{checkpoint_new_name}/'
+                cmd = f'cp {model_dir_plant}/config.pickle team_code/checkpoints/{checkpoint_new_name}/'
                 os.system(cmd)
-                cmd = f'ln -sf {model_dir}/{epoch}.pth team_code/checkpoints/{checkpoint_new_name}/model.pth'
+                cmd = f'ln -sf {model_dir_plant}/{epoch}.pth team_code/checkpoints/{checkpoint_new_name}/model.pth'
                 os.system(cmd)
+                # TODO: Write original model path to txt file.
 
               route_files = []
               for root, _, files in os.walk(route_path):
@@ -261,6 +282,7 @@ def main():
                                       carla_tm_port_start,
                                       benchmark=benchmark,
                                       carla_root=carla_root,
+                                      path_to_tf_conf=path_to_tf_conf,
                                       only_vehicle_bb=only_vehicle_bb,
                                       perc_bb=perc_bb,
                                       perc_light=perc_light,
@@ -370,14 +392,17 @@ def main():
                 experiment += "_FULL_PRIV"
               experiment_name_root = f"{experiment}_{benchmark}_{epoch}"
               eval_root = f'{code_root}/evaluation/{experiment_name_root}'
-              subprocess.check_call(
-                  f'python {code_root}/tools/result_parser.py --xml {code_root}/leaderboard/data/{benchmark}.xml '
-                  f'--results {eval_root} --log_dir {eval_root} --town_maps {code_root}/leaderboard/data/town_maps_xodr '
-                  f'--map_dir {code_root}/leaderboard/data/town_maps_tga --device cpu '
-                  f'--map_data_folder {code_root}/tools/proxy_simulator/map_data --subsample 1 --strict --visualize_infractions',
-                  stdout=sys.stdout,
-                  stderr=sys.stderr,
-                  shell=True)
+              try:
+                subprocess.check_call(
+                    f'python {code_root}/tools/result_parser.py --xml {code_root}/leaderboard/data/{benchmark}.xml '
+                    f'--results {eval_root} --log_dir {eval_root} --town_maps {code_root}/leaderboard/data/town_maps_xodr '
+                    f'--map_dir {code_root}/leaderboard/data/town_maps_tga --device cpu '
+                    f'--map_data_folder {code_root}/tools/proxy_simulator/map_data --subsample 1 --strict --visualize_infractions',
+                    stdout=sys.stdout,
+                    stderr=sys.stderr,
+                    shell=True)
+              except:
+                pass
               subprocess.check_call(
                   f'python {code_root}/tools/result_parser_no_stop_infractions.py --results {eval_root}' ,
                   stdout=sys.stdout,
